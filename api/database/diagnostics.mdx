@@ -1,0 +1,200 @@
+---
+title: 'Diagnostics'
+description: 'Database statistics and storage monitoring'
+icon: 'chart-pie'
+---
+
+## Overview
+
+The diagnostics module provides functions to retrieve database statistics and storage usage information. This is useful for monitoring IndexedDB performance, displaying storage information to users, and debugging data issues.
+
+---
+
+## Types
+
+### IDbStats
+
+Database statistics interface containing record counts and storage information.
+
+```typescript
+interface IDbStats {
+  historyCount: number;
+  sitesCount: number;
+  pagesCount: number;
+  storageUsage?: number;
+  storageQuota?: number;
+}
+```
+
+<ParamField path="historyCount" type="number" required>
+  Total number of records in the `history` table (raw activity logs)
+</ParamField>
+
+<ParamField path="sitesCount" type="number" required>
+  Total number of records in the `sites` table (aggregated site stats)
+</ParamField>
+
+<ParamField path="pagesCount" type="number" required>
+  Total number of records in the `pages` table (page-level stats)
+</ParamField>
+
+<ParamField path="storageUsage" type="number">
+  Current storage usage in bytes (from `navigator.storage.estimate()`)
+</ParamField>
+
+<ParamField path="storageQuota" type="number">
+  Total storage quota available in bytes
+</ParamField>
+
+<Note>
+Storage estimate fields (`storageUsage` and `storageQuota`) are optional and may be undefined if the Storage API is not available or fails.
+</Note>
+
+---
+
+## Functions
+
+### getDatabaseStats()
+
+Retrieves comprehensive database statistics including record counts and storage usage.
+
+```typescript
+function getDatabaseStats(): Promise<IDbStats>
+```
+
+**Returns:** `Promise<IDbStats>`
+
+A promise that resolves to database statistics.
+
+**Example:**
+
+```typescript
+import { getDatabaseStats } from '@/db/diagnostics';
+
+const stats = await getDatabaseStats();
+console.log(`History records: ${stats.historyCount}`);
+console.log(`Sites tracked: ${stats.sitesCount}`);
+console.log(`Pages tracked: ${stats.pagesCount}`);
+
+if (stats.storageUsage && stats.storageQuota) {
+  const usagePercent = (stats.storageUsage / stats.storageQuota) * 100;
+  console.log(`Storage: ${usagePercent.toFixed(1)}% used`);
+}
+```
+
+**Implementation Details:**
+
+- Uses `Promise.all()` to fetch all statistics in parallel
+- Calls `navigator.storage.estimate()` for storage information
+- Handles Storage API unavailability gracefully
+- Returns empty storage fields if the API fails
+
+---
+
+## Usage Examples
+
+### Settings UI Display
+
+```vue
+<script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import { getDatabaseStats, type IDbStats } from '@/db/diagnostics';
+import prettyBytes from 'pretty-bytes';
+
+const stats = ref<IDbStats | null>(null);
+
+onMounted(async () => {
+  stats.value = await getDatabaseStats();
+});
+</script>
+
+<template>
+  <div v-if="stats" class="stats-grid">
+    <div class="stat">
+      <span class="label">History Logs</span>
+      <span class="value">{{ stats.historyCount.toLocaleString() }}</span>
+    </div>
+    <div class="stat">
+      <span class="label">Sites Tracked</span>
+      <span class="value">{{ stats.sitesCount.toLocaleString() }}</span>
+    </div>
+    <div class="stat">
+      <span class="label">Pages Tracked</span>
+      <span class="value">{{ stats.pagesCount.toLocaleString() }}</span>
+    </div>
+    <div v-if="stats.storageUsage" class="stat">
+      <span class="label">Storage Used</span>
+      <span class="value">{{ prettyBytes(stats.storageUsage) }}</span>
+    </div>
+  </div>
+</template>
+```
+
+### Storage Warning Alert
+
+```typescript
+import { getDatabaseStats } from '@/db/diagnostics';
+
+async function checkStorageHealth() {
+  const stats = await getDatabaseStats();
+  
+  if (stats.storageUsage && stats.storageQuota) {
+    const usagePercent = (stats.storageUsage / stats.storageQuota) * 100;
+    
+    if (usagePercent > 80) {
+      console.warn('Storage usage above 80%:', {
+        used: stats.storageUsage,
+        quota: stats.storageQuota,
+        percent: usagePercent.toFixed(1)
+      });
+      // Show user notification to export data or adjust retention
+    }
+  }
+}
+```
+
+### Debug Console Output
+
+```typescript
+import { getDatabaseStats } from '@/db/diagnostics';
+
+async function debugDatabaseState() {
+  const stats = await getDatabaseStats();
+  
+  console.table({
+    'History Records': stats.historyCount,
+    'Site Records': stats.sitesCount,
+    'Page Records': stats.pagesCount,
+    'Storage Used (MB)': stats.storageUsage 
+      ? (stats.storageUsage / 1024 / 1024).toFixed(2)
+      : 'N/A',
+    'Storage Quota (MB)': stats.storageQuota 
+      ? (stats.storageQuota / 1024 / 1024).toFixed(2)
+      : 'N/A'
+  });
+}
+```
+
+---
+
+## Best Practices
+
+<Tip>
+**Performance Consideration:** `getDatabaseStats()` performs multiple database counts in parallel, but can still be slow on large datasets. Cache the results and refresh periodically rather than calling on every render.
+</Tip>
+
+<Warning>
+**Browser Support:** The `navigator.storage.estimate()` API is not available in all browsers or contexts. Always check for `undefined` storage fields before using them.
+</Warning>
+
+<Info>
+**Storage Quota:** The reported quota is an estimate and can change. Browsers may allocate more or less storage dynamically based on available disk space and usage patterns.
+</Info>
+
+---
+
+## Related
+
+- [Data Management](/features/data-management) - User-facing data export and retention features
+- [Retention](/api/database/retention) - Automatic data cleanup and aggregation
+- [Database Service](/api/database/service) - Core database operations

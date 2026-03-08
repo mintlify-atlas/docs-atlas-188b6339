@@ -1,0 +1,277 @@
+---
+title: 'Insights'
+description: 'Weekly analytics and site comparison data'
+icon: 'chart-line'
+---
+
+## Overview
+
+The insights module provides advanced analytics functions for generating weekly reports, site-to-site comparisons, and activity heatmaps. This powers the **Insights** view in the LuminTime popup UI.
+
+---
+
+## Types
+
+### SiteComparison
+
+Compares a site's activity between two time periods (typically this week vs last week).
+
+```typescript
+interface SiteComparison {
+  hostname: string;
+  thisWeek: number;
+  lastWeek: number;
+  changePercent: number;
+}
+```
+
+<ParamField path="hostname" type="string" required>
+  The site's hostname (e.g., `github.com`)
+</ParamField>
+
+<ParamField path="thisWeek" type="number" required>
+  Total duration in milliseconds for the current week
+</ParamField>
+
+<ParamField path="lastWeek" type="number" required>
+  Total duration in milliseconds for the previous week
+</ParamField>
+
+<ParamField path="changePercent" type="number" required>
+  Percentage change from last week to this week. Positive values indicate increase, negative values indicate decrease.
+</ParamField>
+
+### WeeklyInsights
+
+Comprehensive weekly analytics including totals, trends, heatmap, and top site comparisons.
+
+```typescript
+interface WeeklyInsights {
+  thisWeekTotal: number;
+  lastWeekTotal: number;
+  changePercent: number;
+  dailyTrend: { date: string; duration: number }[];
+  heatmap: number[][];
+  topSitesComparison: SiteComparison[];
+}
+```
+
+<ParamField path="thisWeekTotal" type="number" required>
+  Total time spent across all sites this week (in milliseconds)
+</ParamField>
+
+<ParamField path="lastWeekTotal" type="number" required>
+  Total time spent across all sites last week (in milliseconds)
+</ParamField>
+
+<ParamField path="changePercent" type="number" required>
+  Week-over-week percentage change in total activity
+</ParamField>
+
+<ParamField path="dailyTrend" type="array" required>
+  Array of daily activity data for the current week. Each entry has `date` (YYYY-MM-DD) and `duration` (milliseconds).
+</ParamField>
+
+<ParamField path="heatmap" type="number[][]" required>
+  7×24 matrix representing activity by day and hour. `heatmap[dayIndex][hourIndex]` contains duration in milliseconds.
+  - Day index: 0 = Monday, 6 = Sunday
+  - Hour index: 0 = 00:00-01:00, 23 = 23:00-00:00
+</ParamField>
+
+<ParamField path="topSitesComparison" type="SiteComparison[]" required>
+  Array of top 5 sites from this week with week-over-week comparison data
+</ParamField>
+
+---
+
+## Functions
+
+### getWeeklyInsights()
+
+Generates comprehensive weekly analytics including activity totals, daily trends, hourly heatmap, and top site comparisons.
+
+```typescript
+function getWeeklyInsights(
+  thisWeekStart: string,
+  thisWeekEnd: string
+): Promise<WeeklyInsights>
+```
+
+<ParamField path="thisWeekStart" type="string" required>
+  Start date of the current week in YYYY-MM-DD format (typically Monday)
+</ParamField>
+
+<ParamField path="thisWeekEnd" type="string" required>
+  End date of the current week in YYYY-MM-DD format (typically Sunday)
+</ParamField>
+
+**Returns:** `Promise<WeeklyInsights>`
+
+A promise that resolves to comprehensive weekly insights data.
+
+**Example:**
+
+```typescript
+import { getWeeklyInsights } from '@/db/insights';
+import { getStartOfWeek, getEndOfWeek, formatDate } from '@/utils/dateUtils';
+
+const today = new Date();
+const weekStart = formatDate(getStartOfWeek(today));
+const weekEnd = formatDate(getEndOfWeek(today));
+
+const insights = await getWeeklyInsights(weekStart, weekEnd);
+
+console.log(`This week: ${insights.thisWeekTotal}ms`);
+console.log(`Last week: ${insights.lastWeekTotal}ms`);
+console.log(`Change: ${insights.changePercent.toFixed(1)}%`);
+
+// Display top sites
+insights.topSitesComparison.forEach(site => {
+  console.log(`${site.hostname}: ${site.changePercent.toFixed(1)}% change`);
+});
+```
+
+**Implementation Details:**
+
+- Automatically calculates last week's date range by subtracting 7 days
+- Fetches all data in parallel using `Promise.all()`
+- Combines `hourlyStats` (aggregated by retention job) and `history` (recent) for heatmap
+- Returns top 5 sites from current week with historical comparison
+- Handles division by zero when calculating percentage changes
+
+---
+
+## Usage Examples
+
+### Insights View Component
+
+```vue
+<script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import { getWeeklyInsights, type WeeklyInsights } from '@/db/insights';
+import { getStartOfWeek, getEndOfWeek, formatDate } from '@/utils/dateUtils';
+import prettyMs from 'pretty-ms';
+
+const insights = ref<WeeklyInsights | null>(null);
+
+onMounted(async () => {
+  const today = new Date();
+  const weekStart = formatDate(getStartOfWeek(today));
+  const weekEnd = formatDate(getEndOfWeek(today));
+  
+  insights.value = await getWeeklyInsights(weekStart, weekEnd);
+});
+</script>
+
+<template>
+  <div v-if="insights">
+    <div class="week-summary">
+      <h3>This Week</h3>
+      <p class="total">{{ prettyMs(insights.thisWeekTotal) }}</p>
+      <p class="change" :class="insights.changePercent >= 0 ? 'up' : 'down'">
+        {{ insights.changePercent >= 0 ? '↑' : '↓' }}
+        {{ Math.abs(insights.changePercent).toFixed(1) }}% from last week
+      </p>
+    </div>
+    
+    <div class="top-sites">
+      <h4>Top Sites</h4>
+      <div v-for="site in insights.topSitesComparison" :key="site.hostname">
+        <span>{{ site.hostname }}</span>
+        <span>{{ prettyMs(site.thisWeek) }}</span>
+        <span :class="site.changePercent >= 0 ? 'increase' : 'decrease'">
+          {{ site.changePercent.toFixed(0) }}%
+        </span>
+      </div>
+    </div>
+  </div>
+</template>
+```
+
+### Heatmap Visualization
+
+```typescript
+import { getWeeklyInsights } from '@/db/insights';
+
+async function renderHeatmap(weekStart: string, weekEnd: string) {
+  const insights = await getWeeklyInsights(weekStart, weekEnd);
+  const heatmap = insights.heatmap;
+  
+  // Find max value for normalization
+  const maxVal = Math.max(...heatmap.flat());
+  
+  // Render each cell
+  heatmap.forEach((day, dayIdx) => {
+    day.forEach((duration, hour) => {
+      const intensity = duration / maxVal;
+      // Use intensity to set cell color/opacity
+      console.log(`Day ${dayIdx}, Hour ${hour}: ${intensity.toFixed(2)}`);
+    });
+  });
+}
+```
+
+### Weekly Report Generation
+
+```typescript
+import { getWeeklyInsights } from '@/db/insights';
+import prettyMs from 'pretty-ms';
+
+async function generateWeeklyReport(weekStart: string, weekEnd: string): Promise<string> {
+  const insights = await getWeeklyInsights(weekStart, weekEnd);
+  
+  let report = `Weekly Activity Report\n`;
+  report += `Period: ${weekStart} to ${weekEnd}\n\n`;
+  report += `Total Time: ${prettyMs(insights.thisWeekTotal)}\n`;
+  report += `Change: ${insights.changePercent.toFixed(1)}% from previous week\n\n`;
+  report += `Top Sites:\n`;
+  
+  insights.topSitesComparison.forEach((site, idx) => {
+    report += `${idx + 1}. ${site.hostname} - ${prettyMs(site.thisWeek)}`;
+    report += ` (${site.changePercent >= 0 ? '+' : ''}${site.changePercent.toFixed(1)}%)\n`;
+  });
+  
+  return report;
+}
+```
+
+### Daily Trend Chart
+
+```typescript
+import { getWeeklyInsights } from '@/db/insights';
+
+async function getDailyTrendData(weekStart: string, weekEnd: string) {
+  const insights = await getWeeklyInsights(weekStart, weekEnd);
+  
+  // Format for chart library
+  return insights.dailyTrend.map(day => ({
+    date: new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' }),
+    hours: (day.duration / 1000 / 60 / 60).toFixed(1)
+  }));
+}
+```
+
+---
+
+## Best Practices
+
+<Tip>
+**Week Boundaries:** Use `getStartOfWeek()` and `getEndOfWeek()` from the date utils module to ensure consistent week boundaries (Monday to Sunday, ISO 8601 standard).
+</Tip>
+
+<Info>
+**Heatmap Performance:** The heatmap combines pre-aggregated hourly stats with recent history logs. For optimal performance, ensure the retention job runs regularly to aggregate old data.
+</Info>
+
+<Warning>
+**Empty Weeks:** If a week has no activity, `lastWeekTotal` may be 0, resulting in `changePercent` being 0. Handle this case in your UI to avoid displaying misleading "0% change" labels.
+</Warning>
+
+---
+
+## Related
+
+- [Analytics Features](/features/analytics) - User-facing analytics dashboard
+- [Database Service](/api/database/service) - Core query functions
+- [Date Utils](/api/utils/date-utils) - Date manipulation helpers
+- [Retention](/api/database/retention) - Data aggregation for heatmap performance

@@ -67,7 +67,10 @@
               "api/database/types",
               "api/database/blocklist",
               "api/database/export-import",
-              "api/database/retention"
+              "api/database/retention",
+              "api/database/diagnostics",
+              "api/database/insights",
+              "api/database/utils"
             ]
           },
           {

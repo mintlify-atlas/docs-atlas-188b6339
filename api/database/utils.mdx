@@ -1,0 +1,245 @@
+---
+title: 'Database Utils'
+description: 'URL normalization and date helpers for database operations'
+icon: 'wrench'
+---
+
+## Overview
+
+The database utils module provides utility functions for normalizing URLs and generating date strings. These functions are used throughout the database layer to ensure consistent data storage and querying.
+
+---
+
+## Types
+
+### NormalizedUrl
+
+Represents a parsed and normalized URL with extracted components.
+
+```typescript
+interface NormalizedUrl {
+  hostname: string;
+  path: string;
+  protocol: string;
+  fullPath: string;
+  isWebPage: boolean;
+}
+```
+
+<ParamField path="hostname" type="string" required>
+  The normalized hostname (e.g., `github.com` without `www.`). For non-web protocols, returns a system label like `"Local File"` or `"Extension"`.
+</ParamField>
+
+<ParamField path="path" type="string" required>
+  The URL path including cleaned query parameters. Trailing slashes are removed, and tracking parameters are filtered out.
+</ParamField>
+
+<ParamField path="protocol" type="string" required>
+  The URL protocol (e.g., `http:`, `https:`, `file:`, `chrome-extension:`)
+</ParamField>
+
+<ParamField path="fullPath" type="string" required>
+  The complete normalized URL string
+</ParamField>
+
+<ParamField path="isWebPage" type="boolean" required>
+  `true` if the protocol is `http:` or `https:`, `false` for system protocols
+</ParamField>
+
+---
+
+## Functions
+
+### normalizeUrl()
+
+Parses and normalizes a URL string, removing tracking parameters and standardizing the format.
+
+```typescript
+function normalizeUrl(urlStr: string): NormalizedUrl
+```
+
+<ParamField path="urlStr" type="string" required>
+  The URL string to normalize
+</ParamField>
+
+**Returns:** `NormalizedUrl`
+
+The normalized URL object with extracted components.
+
+**Example:**
+
+```typescript
+import { normalizeUrl } from '@/db/utils';
+
+// Web page normalization
+const result1 = normalizeUrl('https://www.github.com/user/repo?utm_source=twitter');
+console.log(result1);
+// {
+//   hostname: 'github.com',
+//   path: '/user/repo',
+//   protocol: 'https:',
+//   fullPath: 'https://github.com/user/repo',
+//   isWebPage: true
+// }
+
+// System URL normalization
+const result2 = normalizeUrl('chrome-extension://abc123/popup.html');
+console.log(result2);
+// {
+//   hostname: 'Extension',
+//   path: '/popup.html',
+//   protocol: 'chrome-extension:',
+//   fullPath: 'chrome-extension://abc123/popup.html',
+//   isWebPage: false
+// }
+```
+
+**Normalization Rules:**
+
+1. **Hostname:** Removes `www.` prefix and converts to lowercase
+2. **Path:** Removes trailing slashes (except root `/`)
+3. **Query Parameters:** Filters out tracking parameters:
+   - `utm_source`, `utm_medium`, `utm_campaign`, `utm_term`, `utm_content`
+   - `fbclid`, `gclid`, `_ga`, `ref`, `source`
+4. **System URLs:** For `file:`, `chrome-extension:`, `about:` protocols, returns a readable label instead of the actual hostname
+
+### getTodayStr()
+
+Returns the current date in YYYY-MM-DD format.
+
+```typescript
+function getTodayStr(): string
+```
+
+**Returns:** `string`
+
+The current date string in YYYY-MM-DD format.
+
+**Example:**
+
+```typescript
+import { getTodayStr } from '@/db/utils';
+
+const today = getTodayStr();
+console.log(today); // "2026-03-08"
+
+// Use in database queries
+import { db } from '@/db';
+const todayStats = await db.sites.where('date').equals(today).toArray();
+```
+
+---
+
+## Usage Examples
+
+### Recording Activity with Normalization
+
+```typescript
+import { normalizeUrl } from '@/db/utils';
+import { recordActivity } from '@/db/service';
+
+async function trackPageVisit(rawUrl: string, duration: number, title?: string) {
+  const normalized = normalizeUrl(rawUrl);
+  
+  // Only track web pages, skip system URLs
+  if (!normalized.isWebPage) {
+    console.log('Skipping non-web URL:', normalized.hostname);
+    return;
+  }
+  
+  await recordActivity(rawUrl, duration, title);
+}
+
+// Example usage
+await trackPageVisit(
+  'https://www.example.com/page?utm_source=google&id=123',
+  5000,
+  'Example Page'
+);
+```
+
+### URL Deduplication
+
+```typescript
+import { normalizeUrl } from '@/db/utils';
+
+function areUrlsEqual(url1: string, url2: string): boolean {
+  const norm1 = normalizeUrl(url1);
+  const norm2 = normalizeUrl(url2);
+  
+  return norm1.hostname === norm2.hostname && norm1.path === norm2.path;
+}
+
+// These are considered equal after normalization:
+areUrlsEqual(
+  'https://www.github.com/user/repo',
+  'https://github.com/user/repo?utm_source=email'
+); // true
+```
+
+### Today's Activity Query
+
+```typescript
+import { getTodayStr } from '@/db/utils';
+import { db } from '@/db';
+
+async function getTodayActivity() {
+  const today = getTodayStr();
+  
+  const [sites, history] = await Promise.all([
+    db.sites.where('date').equals(today).toArray(),
+    db.history.where('date').equals(today).toArray()
+  ]);
+  
+  return { sites, history };
+}
+```
+
+### Tracking Parameter Filtering
+
+```typescript
+import { normalizeUrl } from '@/db/utils';
+
+// Test which parameters are preserved vs removed
+const testUrls = [
+  'https://example.com/search?q=test&utm_source=email', // q=test preserved
+  'https://example.com/product?id=123&fbclid=abc',      // id=123 preserved
+  'https://example.com/page?ref=twitter&page=2'         // page=2 preserved
+];
+
+testUrls.forEach(url => {
+  const normalized = normalizeUrl(url);
+  console.log(`${url}\n  → ${normalized.path}\n`);
+});
+// Output:
+// https://example.com/search?q=test&utm_source=email
+//   → /search?q=test
+// https://example.com/product?id=123&fbclid=abc
+//   → /product?id=123
+// https://example.com/page?ref=twitter&page=2
+//   → /page?page=2
+```
+
+---
+
+## Best Practices
+
+<Tip>
+**Always Normalize URLs:** Use `normalizeUrl()` before any URL comparison or database lookup to ensure consistency. Tracking the same page with different tracking parameters will correctly be grouped together.
+</Tip>
+
+<Warning>
+**Invalid URLs:** If `normalizeUrl()` receives an invalid URL string, it returns a `NormalizedUrl` object with `hostname: "Invalid"` and `isWebPage: false`. Always check `isWebPage` before assuming a valid web URL.
+</Warning>
+
+<Info>
+**Privacy-Focused Filtering:** The tracking parameter filter removes common analytics and campaign parameters, reducing data bloat and improving privacy. User-relevant parameters like `q` (search queries) and `id` (resource identifiers) are preserved.
+</Info>
+
+---
+
+## Related
+
+- [Database Service](/api/database/service) - Uses `normalizeUrl()` in `recordActivity()`
+- [Session Tracking](/features/session-tracking) - How URLs are captured and normalized
+- [Date Utils](/api/utils/date-utils) - More comprehensive date manipulation functions
