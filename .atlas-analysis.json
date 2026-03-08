@@ -1,0 +1,102 @@
+{
+  "projectType": "frontend",
+  "projectName": "LuminTime",
+  "projectDescription": "A privacy-first browser extension that automatically tracks your online activity with local-only storage",
+  "theme": "palm",
+  "primaryColor": "#848c8e",
+  "lightColor": "#11161e",
+  "darkColor": "#cfd0d2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/session-tracking",
+              "features/privacy",
+              "features/analytics",
+              "features/blocklist",
+              "features/data-management"
+            ]
+          },
+          {
+            "group": "Developer Guide",
+            "pages": [
+              "developer/architecture",
+              "developer/database",
+              "developer/development",
+              "developer/testing",
+              "developer/building"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Database",
+            "pages": [
+              "api/database/service",
+              "api/database/types",
+              "api/database/blocklist",
+              "api/database/export-import",
+              "api/database/retention"
+            ]
+          },
+          {
+            "group": "Composables",
+            "pages": [
+              "api/composables/use-date-range",
+              "api/composables/use-dexie-live-query",
+              "api/composables/use-motion-variants"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/utils/session-manager",
+              "api/utils/date-utils"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Background session tracking with Browser Tabs API",
+    "Local-first IndexedDB storage with Dexie.js",
+    "Privacy by design - no cloud sync or telemetry",
+    "Time analytics with daily and hourly trends",
+    "Site blocklist for selective tracking",
+    "Data export and import capabilities"
+  ],
+  "publicApiSurface": [
+    "recordActivity()",
+    "getAggregatedSites()",
+    "getDailyTrend()",
+    "getHourlyTrend()",
+    "getAggregatedPages()",
+    "getHistoryLogs()",
+    "exportAllData()",
+    "importData()",
+    "getBlocklist()",
+    "setBlocklist()",
+    "addToBlocklist()",
+    "removeFromBlocklist()",
+    "useDateRange()",
+    "useDexieLiveQuery()",
+    "useMotionVariants()",
+    "SessionManager"
+  ]
+}
