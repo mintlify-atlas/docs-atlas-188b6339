@@ -1,0 +1,318 @@
+---
+title: 'useMotionVariants'
+description: 'Predefined animation variants for motion-v animations in LuminTime'
+---
+
+## Overview
+
+The `useMotionVariants` module provides a collection of reusable animation variant factories and constants for consistent motion design across the LuminTime extension. These variants are designed to work with [motion-v](https://github.com/ivodolenc/motion-v), a Vue 3 animation library.
+
+<Note>
+  This is not a composable in the traditional sense (no reactive state), but rather a collection of animation variant factories and constants.
+</Note>
+
+## Import
+
+```typescript
+import {
+  contentVariants,
+  cardVariant,
+  listContainerVariants,
+  listItemVariants
+} from '@/composables/useMotionVariants'
+```
+
+## Animation Variants
+
+### contentVariants
+
+Factory function for creating staggered content animations.
+
+```typescript
+function contentVariants(
+  staggerVal: number = 0.08,
+  staggerOptions?: StaggerOptions
+)
+```
+
+<ParamField path="staggerVal" type="number" default="0.08">
+  Delay between each child animation in seconds.
+</ParamField>
+
+<ParamField path="staggerOptions" type="StaggerOptions">
+  Additional options for the stagger animation. See [motion-v stagger documentation](https://github.com/ivodolenc/motion-v) for available options.
+</ParamField>
+
+**Returns:**
+```typescript
+{
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { delayChildren: stagger(staggerVal, staggerOptions) }
+  }
+}
+```
+
+**Usage:**
+```vue
+<script setup lang="ts">
+import { contentVariants as contentVariantsFn } from '@/composables/useMotionVariants'
+
+const contentVariants = contentVariantsFn(0.06, { ease: [0.4, 0, 0.2, 1] })
+</script>
+
+<template>
+  <motion.div :variants="contentVariants" initial="hidden" animate="show">
+    <div>Child 1</div>
+    <div>Child 2</div>
+    <div>Child 3</div>
+  </motion.div>
+</template>
+```
+
+### cardVariant
+
+Predefined variant for card animations with fade-in and slide-up effect.
+
+```typescript
+const cardVariant = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.35 } }
+}
+```
+
+**Usage:**
+```vue
+<script setup lang="ts">
+import { cardVariant } from '@/composables/useMotionVariants'
+</script>
+
+<template>
+  <motion.div 
+    :variants="cardVariant" 
+    initial="hidden" 
+    animate="show"
+    class="card"
+  >
+    <h3>Card Title</h3>
+    <p>Card content</p>
+  </motion.div>
+</template>
+```
+
+### listContainerVariants
+
+Factory function for creating staggered list container animations.
+
+```typescript
+function listContainerVariants(staggerVal: number = 0.08)
+```
+
+<ParamField path="staggerVal" type="number" default="0.08">
+  Delay between each list item animation in seconds.
+</ParamField>
+
+**Returns:**
+```typescript
+{
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { delayChildren: stagger(staggerVal) }
+  }
+}
+```
+
+**Usage:**
+```vue
+<script setup lang="ts">
+import { 
+  listContainerVariants as listContainerVariantsFn,
+  listItemVariants 
+} from '@/composables/useMotionVariants'
+
+const listContainerVariants = listContainerVariantsFn(0.04)
+</script>
+
+<template>
+  <motion.ul :variants="listContainerVariants" initial="hidden" animate="show">
+    <motion.li 
+      v-for="item in items" 
+      :key="item.id"
+      :variants="listItemVariants"
+    >
+      {{ item.name }}
+    </motion.li>
+  </motion.ul>
+</template>
+```
+
+### listItemVariants
+
+Predefined variant for list item animations with fade and slide effects.
+
+```typescript
+const listItemVariants = {
+  hidden: { opacity: 0, x: -12 },
+  show: { opacity: 1, x: 0, transition: { duration: 0.25 } },
+  exit: { opacity: 0, x: 12, transition: { duration: 0.15 } }
+}
+```
+
+**States:**
+- `hidden`: Items slide in from the left
+- `show`: Items reach their final position
+- `exit`: Items slide out to the right (for use with `AnimatePresence`)
+
+## Real-World Examples
+
+### Staggered Card Layout
+
+From `HomeView.vue`:
+
+```vue
+<script setup lang="ts">
+import { motion } from 'motion-v'
+import {
+  contentVariants as contentVariantsFn,
+  cardVariant,
+  listContainerVariants as listContainerVariantsFn,
+  listItemVariants
+} from '@/composables/useMotionVariants'
+
+const contentVariants = contentVariantsFn()
+const listContainerVariants = listContainerVariantsFn()
+</script>
+
+<template>
+  <motion.div :variants="contentVariants" initial="hidden" animate="show">
+    <!-- Cards appear with stagger -->
+    <motion.div :variants="cardVariant" class="card">
+      <h3>Total Time Today</h3>
+      <p>2h 34m</p>
+    </motion.div>
+    
+    <motion.div :variants="cardVariant" class="card">
+      <h3>Sites Visited</h3>
+      <p>12</p>
+    </motion.div>
+    
+    <!-- List with nested stagger -->
+    <motion.div :variants="cardVariant">
+      <motion.ul :variants="listContainerVariants" initial="hidden" animate="show">
+        <motion.li v-for="site in sites" :key="site.id" :variants="listItemVariants">
+          {{ site.name }}
+        </motion.li>
+      </motion.ul>
+    </motion.div>
+  </motion.div>
+</template>
+```
+
+### Custom Stagger Settings
+
+From `SiteDetailView.vue`:
+
+```vue
+<script setup lang="ts">
+import {
+  contentVariants as contentVariantsFn,
+  listContainerVariants as listContainerVariantsFn,
+  listItemVariants
+} from '@/composables/useMotionVariants'
+
+// Faster content animation
+const contentVariants = contentVariantsFn()
+
+// Faster list animation
+const listContainerVariants = listContainerVariantsFn(0.04)
+
+// Custom card variant
+const cardVariant = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
+}
+</script>
+```
+
+### With AnimatePresence
+
+```vue
+<script setup lang="ts">
+import { motion, AnimatePresence } from 'motion-v'
+import { listItemVariants } from '@/composables/useMotionVariants'
+
+const items = ref([...])
+</script>
+
+<template>
+  <ul>
+    <AnimatePresence>
+      <motion.li
+        v-for="item in items"
+        :key="item.id"
+        :variants="listItemVariants"
+        initial="hidden"
+        animate="show"
+        exit="exit"
+      >
+        {{ item.name }}
+      </motion.li>
+    </AnimatePresence>
+  </ul>
+</template>
+```
+
+## Animation Details
+
+### Timing
+
+- **Content stagger**: 0.08s default (customizable)
+- **Card duration**: 0.35s
+- **List item duration**: 0.25s (show), 0.15s (exit)
+- **List stagger**: 0.08s default (customizable)
+
+### Effects
+
+- **Opacity**: All variants use fade-in/fade-out (0 to 1)
+- **Card**: Slides up 12px (`y: 12` → `y: 0`)
+- **List items**: Slides from left on enter (`x: -12`), slides right on exit (`x: 12`)
+
+## Type Definitions
+
+```typescript
+type StaggerOptions = NonNullable<Parameters<typeof stagger>[1]>
+```
+
+See [motion-v documentation](https://github.com/ivodolenc/motion-v) for full `StaggerOptions` details.
+
+## Best Practices
+
+1. **Use factory functions**: Always call variant factories to create new objects:
+   ```typescript
+   // Good
+   const variants = contentVariants()
+   
+   // Bad (shared reference)
+   const variants = contentVariants
+   ```
+
+2. **Customize stagger for content density**:
+   - Dense lists: `0.04s`
+   - Normal content: `0.08s`
+   - Spacious layouts: `0.12s`
+
+3. **Combine variants**: Use container variants with item variants for nested animations
+
+4. **Match DaisyUI**: These variants are designed to complement DaisyUI's design system
+
+## Related
+
+- [motion-v Documentation](https://github.com/ivodolenc/motion-v)
+- [Vue Motion Guide](https://vuejs.org/guide/extras/animation.html)
+- Component Library
+
+## Source
+
+View the source code: [`src/composables/useMotionVariants.ts`](https://github.com/yourusername/lumintime/blob/main/src/composables/useMotionVariants.ts)

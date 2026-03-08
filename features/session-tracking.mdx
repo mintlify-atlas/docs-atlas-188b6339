@@ -1,0 +1,320 @@
+---
+title: 'Session Tracking'
+description: 'Understand how LuminTime automatically tracks your browsing sessions in the background'
+icon: 'clock'
+---
+
+## How Session Tracking Works
+
+LuminTime uses a sophisticated background service worker to automatically track your browsing activity with minimal performance impact. The extension monitors browser events and maintains an active session for the currently focused tab.
+
+### Architecture Overview
+
+The session tracking system is built on several key components:
+
+<CardGroup cols={2}>
+  <Card title="Background Service Worker" icon="gear">
+    Listens to browser events and orchestrates session management
+  </Card>
+  <Card title="SessionManager" icon="database">
+    Handles session lifecycle with debouncing and queueing
+  </Card>
+  <Card title="Browser APIs" icon="browser">
+    Tabs API, Windows API, Idle API, and Web Navigation API
+  </Card>
+  <Card title="Local Storage" icon="hard-drive">
+    Persists active session state across browser restarts
+  </Card>
+</CardGroup>
+
+## Event Monitoring
+
+LuminTime tracks sessions by listening to browser events:
+
+### Tab Events
+
+**Tab Activation** - When you switch to a different tab, the previous session ends and a new one begins:
+
+```typescript
+// From background.ts
+browser.tabs.onActivated.addListener((activeInfo) => {
+  const tab = await browser.tabs.get(activeInfo.tabId);
+  sessionManager.handleEvent('switch', {
+    url: tab.url ?? null,
+    title: tab.title,
+    eventSource: 'tab_activated',
+  });
+});
+```
+
+**Navigation** - When you navigate to a new page within the same tab:
+
+```typescript
+// From background.ts
+browser.webNavigation.onCompleted.addListener((details) => {
+  if (details.frameId !== 0) return; // Only track top-level navigation
+  
+  sessionManager.handleEvent('switch', {
+    url: activeTab.url ?? null,
+    title: activeTab.title,
+    eventSource: 'navigation',
+  });
+});
+```
+
+### Window Focus Events
+
+LuminTime tracks when you switch between browser windows or move focus away from the browser:
+
+```typescript
+browser.windows.onFocusChanged.addListener((windowId) => {
+  if (windowId === browser.windows.WINDOW_ID_NONE) {
+    // Browser lost focus - stop tracking
+    await applyBrowserFocusState(false);
+  } else {
+    // Browser gained focus - resume tracking
+    await applyBrowserFocusState(true);
+  }
+});
+```
+
+<Info>
+When the browser loses focus, tracking automatically pauses. This ensures you're only tracked when actively using the browser.
+</Info>
+
+### Idle Detection
+
+The extension monitors system idle state with a 30-second detection interval:
+
+```typescript
+const IDLE_DETECTION_INTERVAL = 30; // seconds
+browser.idle.setDetectionInterval(IDLE_DETECTION_INTERVAL);
+
+browser.idle.onStateChanged.addListener((state) => {
+  if (state === 'active') {
+    // User returned - resume tracking
+    sessionManager.handleEvent('idle', {
+      url: result.url,
+      title: result.title,
+      eventSource: 'idle_resume',
+    });
+  } else {
+    // User went idle - stop tracking
+    sessionManager.handleEvent('idle', { url: null });
+  }
+});
+```
+
+## Session Management
+
+### Session Lifecycle
+
+<Steps>
+  <Step title="Session Start">
+    When you visit a trackable website (http/https), a new session begins:
+    - Current timestamp is recorded as `startTime`
+    - URL and page title are captured
+    - Session data is persisted to local storage
+    - A periodic alarm is created for data reliability
+  </Step>
+  
+  <Step title="Session Active">
+    While the session is active:
+    - Every minute, the alarm triggers to save accumulated time
+    - The session is "ticked" - duration is recorded and session restarts
+    - This ensures data isn't lost if the browser crashes
+  </Step>
+  
+  <Step title="Session End">
+    When you switch tabs, navigate away, or go idle:
+    - Elapsed time since last update is calculated
+    - Total duration is written to the database
+    - Session storage is cleared
+    - If no new session starts, the alarm is removed
+  </Step>
+</Steps>
+
+### Debouncing
+
+To handle rapid tab switching efficiently, session transitions are debounced by 500ms:
+
+```typescript
+private readonly DEBOUNCE_MS = 500;
+
+handleEvent(type: 'switch' | 'alarm' | 'idle', data) {
+  if (type === 'switch') {
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    
+    this.debounceTimer = setTimeout(() => {
+      this.queue.addItem(() => this._executeTransition(data));
+    }, this.DEBOUNCE_MS);
+  }
+}
+```
+
+<Note>
+If you rapidly switch between tabs, only the final tab will be tracked. This prevents excessive database writes and improves performance.
+</Note>
+
+### Event Queue
+
+All session transitions are queued and processed serially to prevent race conditions:
+
+```typescript
+this.queue = new AsyncQueuer(
+  async (task: () => Promise<void>) => {
+    await task();
+  },
+  { concurrency: 1 }
+);
+```
+
+This ensures that:
+- Sessions are always ended before new ones start
+- Database writes happen in the correct order
+- No session data is lost due to concurrent modifications
+
+## Data Recording
+
+When a session ends, the data is recorded to IndexedDB across three tables:
+
+### History Table
+
+Raw activity logs with granular detail:
+
+```typescript
+await db.history.add({
+  date: '2026-03-08',
+  hostname: 'github.com',
+  path: '/anomalyco/lumintime',
+  startTime: 1741478400000,
+  duration: 125000, // milliseconds
+  title: 'LuminTime Repository',
+  eventSource: 'tab_activated'
+});
+```
+
+### Sites Table
+
+Aggregated statistics per site per day:
+
+```typescript
+await db.sites.update([date, hostname], {
+  duration: existingDuration + newDuration,
+  lastVisit: Math.max(existingLastVisit, sessionEndTime)
+});
+```
+
+### Pages Table
+
+Aggregated statistics per page per day:
+
+```typescript
+await db.pages.update([date, hostname, path], {
+  duration: existingDuration + newDuration,
+  title: title ?? existingTitle
+});
+```
+
+### Midnight Splitting
+
+Sessions that span midnight are automatically split into separate records:
+
+```typescript
+export function splitByMidnight(startTime: number, duration: number): DaySplit[] {
+  const endTime = startTime + duration;
+  const nextMidnight = new Date(
+    startDate.getFullYear(),
+    startDate.getMonth(),
+    startDate.getDate() + 1
+  ).getTime();
+  
+  if (endTime <= nextMidnight) {
+    return [{ date: formatDate(startDate), startTime, duration }];
+  }
+  
+  // Split into two records
+  return [
+    { date: formatDate(startDate), startTime, duration: nextMidnight - startTime },
+    { date: formatDate(new Date(nextMidnight)), startTime: nextMidnight, duration: endTime - nextMidnight }
+  ];
+}
+```
+
+<Warning>
+Sessions are only recorded if they're for http/https URLs. Browser internal pages (chrome://, about:, etc.) are automatically excluded.
+</Warning>
+
+## Periodic Alarms
+
+LuminTime uses browser alarms for reliable periodic updates:
+
+### Session Tick Alarm
+
+Runs every minute while a session is active:
+
+```typescript
+const SESSION_TICK_ALARM_NAME = 'session-update';
+const SESSION_PER_MINUTE = 1;
+
+browser.alarms.create(SESSION_TICK_ALARM_NAME, {
+  periodInMinutes: SESSION_PER_MINUTE
+});
+```
+
+When triggered:
+1. Current session is saved to database
+2. Session is immediately restarted with the same URL
+3. This ensures data is saved at least every minute
+
+### Retention Alarm
+
+Runs every hour to aggregate old data:
+
+```typescript
+const RETENTION_ALARM_NAME = 'retention-cleanup';
+const RETENTION_ALARM_PERIOD = 60; // minutes
+
+browser.alarms.create(RETENTION_ALARM_NAME, {
+  delayInMinutes: 2,
+  periodInMinutes: RETENTION_ALARM_PERIOD
+});
+```
+
+See [Data Management](/features/data-management) for details on data retention.
+
+## Performance Considerations
+
+### Minimal Overhead
+
+- **Debouncing**: Rapid tab switches don't trigger excessive writes
+- **Queuing**: Serial processing prevents race conditions
+- **Periodic saves**: Data is saved every minute, not on every event
+- **Indexed queries**: All database queries use compound indexes for speed
+
+### Memory Efficiency
+
+- Only one active session is stored in memory at a time
+- Historical data is stored in IndexedDB, not in memory
+- Blocklist is cached on startup to avoid repeated database reads
+
+<Info>
+The session tracking system is designed to have negligible impact on browser performance, even with thousands of page visits.
+</Info>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Blocklist" icon="ban" href="/features/blocklist">
+    Exclude specific sites from tracking
+  </Card>
+  <Card title="Analytics" icon="chart-line" href="/features/analytics">
+    View your tracked session data
+  </Card>
+  <Card title="Privacy" icon="shield" href="/features/privacy">
+    Learn about data privacy
+  </Card>
+  <Card title="Data Management" icon="database" href="/features/data-management">
+    Export and manage your data
+  </Card>
+</CardGroup>

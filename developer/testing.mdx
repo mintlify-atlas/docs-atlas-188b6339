@@ -1,0 +1,489 @@
+---
+title: Testing
+description: Testing strategy and running tests with Vitest
+---
+
+## Overview
+
+LuminTime uses **Vitest** for fast, modern unit testing. Tests focus on:
+
+- Core business logic (session management, data aggregation)
+- Database operations (CRUD, transactions, indexes)
+- Utility functions (date formatting, domain parsing)
+- Vue composables (reactive state management)
+
+<Note>
+  UI components and extension integration are tested manually. Automated E2E tests with Playwright may be added in the future.
+</Note>
+
+## Test Setup
+
+### Vitest Configuration
+
+From `vitest.config.ts`:
+
+```typescript
+import { defineConfig } from "vitest/config";
+import { WxtVitest } from "wxt/testing/vitest-plugin";
+
+export default defineConfig({
+  plugins: [WxtVitest()],              // WXT test utilities and mocks
+  test: {
+    environment: "node",               // Node.js environment (no browser)
+    globals: true,                     // Auto-import test, expect, describe
+    include: ["tests/**/*.{test,spec}.{ts,js}"],
+    clearMocks: true,                  // Reset mocks between tests
+    restoreMocks: true,                // Restore original implementations
+  },
+});
+```
+
+**Key Features:**
+- **WxtVitest plugin**: Provides mocks for `browser.*` APIs
+- **Globals enabled**: No need to import `test`, `expect`, `describe`
+- **Node environment**: Fast tests without browser overhead
+
+### Test Structure
+
+```
+tests/
+├── db/                        # Database tests
+│   ├── service.test.ts        # recordActivity, queries
+│   ├── retention.test.ts      # Data cleanup jobs
+│   └── insights.test.ts       # Analytics queries
+├── utils/                     # Utility tests
+│   ├── date.test.ts           # Date formatting
+│   └── domain.test.ts         # Domain parsing
+├── components/                # Component tests
+│   └── SiteCard.test.ts       # Vue component rendering
+└── SessionManager.test.ts     # Core logic tests
+```
+
+## Running Tests
+
+<CodeGroup>
+
+```bash Run All Tests
+bun run test
+# Executes all tests once and exits
+# Shows coverage summary if configured
+```
+
+```bash Watch Mode
+bun run test --watch
+# Re-runs tests on file changes
+# Interactive mode with filtering
+```
+
+```bash Run Specific File
+bun run test tests/db/service.test.ts
+# Runs only service.test.ts
+```
+
+```bash Run by Pattern
+bun run test --grep "recordActivity"
+# Runs tests matching the pattern
+```
+
+```bash Coverage Report
+bun run test --coverage
+# Generates coverage report
+# Requires @vitest/coverage-v8
+```
+
+</CodeGroup>
+
+## Writing Tests
+
+### Basic Test Structure
+
+```typescript
+// tests/utils/date.test.ts
+import { describe, test, expect } from 'vitest';
+import { formatDate, getDateDaysAgo } from '@/utils/date';
+
+describe('formatDate', () => {
+  test('formats timestamp as YYYY-MM-DD', () => {
+    const timestamp = new Date('2026-03-08T10:30:00Z').getTime();
+    expect(formatDate(timestamp)).toBe('2026-03-08');
+  });
+  
+  test('handles midnight edge case', () => {
+    const midnight = new Date('2026-03-08T00:00:00Z').getTime();
+    expect(formatDate(midnight)).toBe('2026-03-08');
+  });
+});
+
+describe('getDateDaysAgo', () => {
+  test('returns date N days ago', () => {
+    const result = getDateDaysAgo(7);
+    // Verify it's 7 days before today
+    const expected = new Date();
+    expected.setDate(expected.getDate() - 7);
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+```
+
+### Database Tests
+
+Test database operations with in-memory Dexie:
+
+```typescript
+// tests/db/service.test.ts
+import { describe, test, expect, beforeEach } from 'vitest';
+import { db } from '@/db';
+import { recordActivity } from '@/db/service';
+
+describe('recordActivity', () => {
+  beforeEach(async () => {
+    // Clear database before each test
+    await db.history.clear();
+    await db.sites.clear();
+    await db.pages.clear();
+  });
+  
+  test('creates history log, site stat, and page stat', async () => {
+    await recordActivity({
+      url: 'https://github.com/explore',
+      title: 'Explore GitHub',
+      startTime: Date.now(),
+      duration: 5000,
+      eventSource: 'tab_activated',
+    });
+    
+    // Check L1: History log created
+    const logs = await db.history.toArray();
+    expect(logs).toHaveLength(1);
+    expect(logs[0].hostname).toBe('github.com');
+    expect(logs[0].path).toBe('/explore');
+    
+    // Check L2: Site stat created
+    const sites = await db.sites.toArray();
+    expect(sites).toHaveLength(1);
+    expect(sites[0].hostname).toBe('github.com');
+    expect(sites[0].duration).toBe(5000);
+    
+    // Check L3: Page stat created
+    const pages = await db.pages.toArray();
+    expect(pages).toHaveLength(1);
+    expect(pages[0].path).toBe('/explore');
+  });
+  
+  test('aggregates multiple sessions for same site', async () => {
+    const date = Date.now();
+    
+    // Record two sessions on same site
+    await recordActivity({
+      url: 'https://github.com/explore',
+      startTime: date,
+      duration: 3000,
+    });
+    
+    await recordActivity({
+      url: 'https://github.com/trending',
+      startTime: date + 10000,
+      duration: 2000,
+    });
+    
+    // Should have 2 history logs
+    expect(await db.history.count()).toBe(2);
+    
+    // But only 1 site stat with combined duration
+    const sites = await db.sites.toArray();
+    expect(sites).toHaveLength(1);
+    expect(sites[0].duration).toBe(5000);
+    
+    // And 2 page stats (different paths)
+    expect(await db.pages.count()).toBe(2);
+  });
+});
+```
+
+### SessionManager Tests
+
+Test core tracking logic with mocked dependencies:
+
+```typescript
+// tests/SessionManager.test.ts
+import { describe, test, expect, vi } from 'vitest';
+import { SessionManager } from '@/utils/SessionManager';
+
+describe('SessionManager', () => {
+  test('starts tracking on switch event', async () => {
+    const recordActivity = vi.fn();
+    const storage = {
+      getValue: vi.fn().mockResolvedValue({
+        url: '',
+        startTime: 0,
+        duration: 0,
+      }),
+      setValue: vi.fn(),
+    };
+    
+    const manager = new SessionManager({
+      storage,
+      recordActivity,
+      alarmName: 'test-alarm',
+      alarmPeriodInMinutes: 1,
+      isUrlBlocked: () => false,
+    });
+    
+    await manager.init();
+    
+    // Simulate tab switch
+    manager.handleEvent('switch', {
+      url: 'https://example.com',
+      title: 'Example',
+      eventSource: 'tab_activated',
+    });
+    
+    // Should start tracking new session
+    expect(storage.setValue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://example.com',
+        title: 'Example',
+      })
+    );
+  });
+  
+  test('records activity when switching tabs', async () => {
+    const recordActivity = vi.fn();
+    const storage = {
+      getValue: vi.fn().mockResolvedValue({
+        url: 'https://old-site.com',
+        title: 'Old Site',
+        startTime: Date.now() - 5000,
+        duration: 0,
+      }),
+      setValue: vi.fn(),
+    };
+    
+    const manager = new SessionManager({
+      storage,
+      recordActivity,
+      alarmName: 'test-alarm',
+      alarmPeriodInMinutes: 1,
+      isUrlBlocked: () => false,
+    });
+    
+    await manager.init();
+    
+    // Switch to new tab
+    manager.handleEvent('switch', {
+      url: 'https://new-site.com',
+      eventSource: 'tab_activated',
+    });
+    
+    // Should record previous session
+    expect(recordActivity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://old-site.com',
+        title: 'Old Site',
+        duration: expect.any(Number),
+      })
+    );
+  });
+  
+  test('skips blocked URLs', async () => {
+    const recordActivity = vi.fn();
+    const storage = {
+      getValue: vi.fn().mockResolvedValue({
+        url: '',
+        startTime: 0,
+        duration: 0,
+      }),
+      setValue: vi.fn(),
+    };
+    
+    const manager = new SessionManager({
+      storage,
+      recordActivity,
+      alarmName: 'test-alarm',
+      alarmPeriodInMinutes: 1,
+      isUrlBlocked: (url) => url.includes('blocked.com'),
+    });
+    
+    await manager.init();
+    
+    // Try to track blocked URL
+    manager.handleEvent('switch', {
+      url: 'https://blocked.com',
+      eventSource: 'tab_activated',
+    });
+    
+    // Should not start tracking
+    expect(storage.setValue).not.toHaveBeenCalled();
+  });
+});
+```
+
+### Mocking Browser APIs
+
+WXT's `WxtVitest` plugin provides mocks:
+
+```typescript
+import { browser } from 'wxt/testing';
+
+test('queries active tab', async () => {
+  // Mock browser.tabs.query
+  browser.tabs.query.mockResolvedValue([
+    { id: 1, url: 'https://example.com', active: true },
+  ]);
+  
+  const result = await getActiveTab();
+  expect(result.url).toBe('https://example.com');
+});
+```
+
+## Test Coverage
+
+Generate coverage reports:
+
+```bash
+bun add -d @vitest/coverage-v8
+bun run test --coverage
+```
+
+**Output:**
+
+```
+--------------------|---------|----------|---------|---------|-------------------
+File                | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s
+--------------------|---------|----------|---------|---------|-------------------
+All files           |   85.32 |    78.45 |   88.23 |   85.32 |
+db/                 |   92.15 |    85.71 |   95.00 |   92.15 |
+  service.ts        |   95.23 |    88.88 |  100.00 |   95.23 | 45-48
+  retention.ts      |   88.00 |    80.00 |   90.00 |   88.00 | 23-25
+utils/              |   78.50 |    70.00 |   80.00 |   78.50 |
+  SessionManager.ts |   82.35 |    75.00 |   85.71 |   82.35 | 78-82,95-98
+--------------------|---------|----------|---------|---------|-------------------
+```
+
+## Testing Best Practices
+
+<AccordionGroup>
+  <Accordion title="Test behavior, not implementation">
+    Focus on what functions do, not how they do it:
+    
+    ```typescript
+    // Good: Tests observable behavior
+    test('records activity and updates site duration', async () => {
+      await recordActivity(data);
+      const site = await db.sites.get([date, hostname]);
+      expect(site.duration).toBe(5000);
+    });
+    
+    // Bad: Tests internal implementation details
+    test('calls db.transaction with correct arguments', async () => {
+      const spy = vi.spyOn(db, 'transaction');
+      await recordActivity(data);
+      expect(spy).toHaveBeenCalledWith('rw', ...);
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Use beforeEach for test isolation">
+    Reset state before each test:
+    
+    ```typescript
+    beforeEach(async () => {
+      await db.history.clear();
+      await db.sites.clear();
+      await db.pages.clear();
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Test edge cases">
+    Don't just test the happy path:
+    
+    ```typescript
+    test('handles empty URL', () => {
+      expect(() => recordActivity({ url: '' })).toThrow();
+    });
+    
+    test('handles very long duration', async () => {
+      await recordActivity({ duration: Number.MAX_SAFE_INTEGER });
+      // Verify it doesn't overflow or corrupt data
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Keep tests fast">
+    - Use in-memory database (Dexie handles this)
+    - Mock expensive operations
+    - Avoid `setTimeout` and real timers (use `vi.useFakeTimers()`)
+  </Accordion>
+</AccordionGroup>
+
+## Debugging Tests
+
+### Run Single Test
+
+```typescript
+test.only('this test runs alone', () => {
+  // Isolate a failing test
+});
+```
+
+### Skip Flaky Tests
+
+```typescript
+test.skip('flaky test to fix later', () => {
+  // Temporarily disable
+});
+```
+
+### Use Console Logs
+
+```typescript
+test('debug this', async () => {
+  const result = await someFunction();
+  console.log('Result:', result); // Appears in test output
+  expect(result).toBe(expected);
+});
+```
+
+### VS Code Integration
+
+Install **Vitest extension** for VS Code:
+
+- Run tests inline with code
+- View test results in sidebar
+- Debug tests with breakpoints
+
+## Continuous Integration
+
+Run tests in CI pipeline:
+
+```yaml
+# .github/workflows/test.yml
+name: Test
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: oven-sh/setup-bun@v1
+      - run: bun install
+      - run: bun run test
+      - run: bun run compile  # Type check
+      - run: bun run lint      # Lint
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/developer/architecture">
+    Understand the system you're testing
+  </Card>
+  <Card title="Development" icon="code" href="/developer/development">
+    Run tests in your local environment
+  </Card>
+  <Card title="Building" icon="hammer" href="/developer/building">
+    Build production-ready packages
+  </Card>
+</CardGroup>

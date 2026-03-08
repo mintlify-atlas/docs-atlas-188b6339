@@ -1,0 +1,348 @@
+---
+title: 'Privacy'
+description: 'LuminTime is built with privacy as the top priority - your data never leaves your device'
+icon: 'shield-halved'
+---
+
+## Privacy-First Architecture
+
+LuminTime is designed from the ground up to protect your privacy. All data collection, storage, and analysis happens entirely on your local device. There are no servers, no accounts, and no data transmission.
+
+<Note>
+**Core Privacy Principles:**
+- 100% local-first: All data stays in your browser's IndexedDB
+- No telemetry: We don't collect usage statistics or crash reports
+- No cloud sync: Your data is never transmitted anywhere
+- No accounts: No sign-up, login, or authentication required
+- Open source: All code is publicly auditable
+</Note>
+
+## Local-First Data Storage
+
+### IndexedDB Storage
+
+All browsing activity data is stored in your browser's IndexedDB, a local database that:
+
+- Resides entirely on your device
+- Is isolated per browser profile
+- Cannot be accessed by websites you visit
+- Is only accessible by the extension itself
+
+```typescript
+// Database initialization (from db/index.ts)
+import Dexie from 'dexie';
+
+export const db = new Dexie('LuminTimeDB');
+
+db.version(1).stores({
+  history: '++id, date, [date+hostname], hostname, startTime',
+  sites: '[date+hostname], date, hostname',
+  pages: '[date+hostname+path], date, hostname',
+  meta: 'key',
+  hourlyStats: '[date+hour], date'
+});
+```
+
+### No Network Requests
+
+LuminTime never makes network requests. The extension:
+
+- Doesn't communicate with external servers
+- Doesn't send analytics or telemetry
+- Doesn't download updates or sync data
+- Doesn't use third-party services or APIs
+
+<Info>
+You can verify this by checking the extension's network activity in your browser's developer tools. You'll see zero requests.
+</Info>
+
+## What Data is Collected
+
+LuminTime tracks only the information necessary to provide time analytics:
+
+### Tracked Data
+
+<CardGroup cols={2}>
+  <Card title="URLs" icon="link">
+    The full URLs of pages you visit (http/https only)
+  </Card>
+  <Card title="Page Titles" icon="heading">
+    The title element of each page
+  </Card>
+  <Card title="Timestamps" icon="clock">
+    When each session started and ended
+  </Card>
+  <Card title="Duration" icon="hourglass">
+    How long you spent on each page
+  </Card>
+</CardGroup>
+
+### Not Tracked
+
+- Browser internal pages (chrome://, about:, etc.)
+- Page content or text
+- Form inputs or passwords
+- Cookies or local storage from websites
+- Mouse movements or keyboard input
+- Screenshots or visual data
+- Your IP address or location
+
+### Trackable URLs Only
+
+Only http and https URLs are tracked:
+
+```typescript
+function isTrackableWebUrl(url: string): boolean {
+  if (!url) return false;
+  
+  try {
+    const parsedUrl = new URL(url);
+    return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+```
+
+<Warning>
+Browser internal pages like `chrome://settings`, `about:config`, and extension pages are never tracked.
+</Warning>
+
+## Data Isolation
+
+### Browser Profile Isolation
+
+Each browser profile has its own isolated LuminTime database:
+
+- Work profile data is separate from personal profile
+- Guest/incognito windows use separate storage
+- Data cannot be shared between profiles
+
+### Extension Permissions
+
+LuminTime requires minimal browser permissions:
+
+```json
+// From manifest (wxt.config.ts)
+{
+  "permissions": [
+    "tabs",           // Read active tab URLs and titles
+    "idle",           // Detect when user goes idle
+    "alarms",         // Periodic session saves
+    "storage",        // Save active session state
+    "webNavigation"   // Detect page navigation
+  ],
+  "host_permissions": [
+    "<all_urls>"      // Access tab URLs (not page content)
+  ]
+}
+```
+
+<Note>
+While LuminTime requests `<all_urls>` permission, this is only used to read tab URLs from the Tabs API. The extension cannot and does not access page content, cookies, or other sensitive data.
+</Note>
+
+## Blocklist for Sensitive Sites
+
+You can exclude sensitive websites from tracking entirely:
+
+```typescript
+// Example: Add a site to blocklist
+await addToBlocklist('mybank.com');
+
+// The extension checks before recording
+const isBlocked = isHostnameBlocked('mybank.com', cachedBlocklist);
+if (!isBlocked) {
+  await recordActivity(url, duration, title);
+}
+```
+
+See [Blocklist](/features/blocklist) for detailed usage.
+
+## Data Ownership and Control
+
+### You Own Your Data
+
+All data belongs to you and stays under your control:
+
+<Steps>
+  <Step title="View Anytime">
+    All data is accessible through the extension popup - no hidden or encrypted data
+  </Step>
+  
+  <Step title="Export Anytime">
+    Export all your data to a JSON file for backup or migration
+  </Step>
+  
+  <Step title="Delete Anytime">
+    Delete specific sites or clear all data from the settings page
+  </Step>
+  
+  <Step title="Uninstall Anytime">
+    Uninstalling the extension removes all data from your device
+  </Step>
+</Steps>
+
+### Data Export Format
+
+Exported data is in plain JSON format:
+
+```json
+{
+  "version": 1,
+  "exportedAt": "2026-03-08T12:00:00.000Z",
+  "history": [
+    {
+      "date": "2026-03-08",
+      "hostname": "github.com",
+      "path": "/anomalyco/lumintime",
+      "startTime": 1741478400000,
+      "duration": 125000,
+      "title": "LuminTime Repository",
+      "eventSource": "tab_activated"
+    }
+  ],
+  "sites": [...],
+  "pages": [...]
+}
+```
+
+See [Data Management](/features/data-management) for export/import details.
+
+## No Telemetry or Analytics
+
+Unlike most software, LuminTime collects zero telemetry:
+
+- No crash reports
+- No usage statistics
+- No feature analytics
+- No version checks
+- No update pings
+- No error tracking services (Sentry, Bugsnag, etc.)
+
+<Info>
+The development team has no visibility into how you use LuminTime. We rely on GitHub issues for bug reports and feature requests.
+</Info>
+
+## Comparison with Other Time Trackers
+
+| Feature | LuminTime | Cloud-based Trackers |
+|---------|-----------|----------------------|
+| Data Storage | Local only | Cloud servers |
+| Account Required | No | Yes |
+| Data Ownership | 100% yours | Shared with service |
+| Network Requests | Zero | Continuous sync |
+| Privacy Policy | Not needed | Complex legal docs |
+| Data Access | Direct | Via API/UI only |
+| Export Format | Plain JSON | Often proprietary |
+| Audit Trail | None (local) | Server logs exist |
+
+## Data Retention
+
+To manage storage space, old raw history logs are aggregated:
+
+- **Raw logs**: Kept for 7 days by default (configurable: 7, 14, 30, or 90 days)
+- **Hourly summaries**: Created from raw logs older than retention period
+- **Daily aggregates**: Never deleted automatically
+
+```typescript
+// Retention job runs every hour
+export async function runRetentionJob(maxDays = 3): Promise<void> {
+  const rawRetentionDays = await getRawRetentionDays();
+  const cutoff = formatDate(addDays(parseDate(getTodayStr()), -(rawRetentionDays - 1)));
+  
+  for (let i = 0; i < maxDays; i++) {
+    const oldest = await db.history.orderBy('date').first();
+    if (!oldest || oldest.date >= cutoff) break;
+    await aggregateOneDay(oldest.date);
+  }
+}
+```
+
+<Note>
+Aggregation preserves hourly time data while reducing storage usage. Your daily and weekly analytics remain accurate even after raw logs are aggregated.
+</Note>
+
+## Security Considerations
+
+### Browser Security Model
+
+LuminTime benefits from the browser's security model:
+
+- Extension code runs in an isolated context
+- IndexedDB is encrypted at rest by the OS (when device encryption is enabled)
+- Data is protected by the browser's sandbox
+- Only the extension can access its own storage
+
+### No Authentication Vulnerabilities
+
+With no accounts or servers, entire classes of vulnerabilities are eliminated:
+
+- No password breaches
+- No session hijacking
+- No CSRF attacks
+- No SQL injection
+- No API key leaks
+- No man-in-the-middle attacks
+
+<Warning>
+If someone gains physical or remote access to your device and browser profile, they could access your LuminTime data. Use device encryption and strong browser profile passwords to protect against this.
+</Warning>
+
+## Open Source Transparency
+
+LuminTime is open source, allowing full transparency:
+
+- All code is publicly available on GitHub
+- Anyone can audit the codebase
+- No obfuscation or minification of core logic
+- Community can verify privacy claims
+
+<Info>
+**GitHub Repository:** [github.com/anomalyco/lumintime](https://github.com/anomalyco/lumintime)
+
+Feel free to review the code, open issues, or contribute improvements.
+</Info>
+
+## Privacy Best Practices
+
+To maximize your privacy while using LuminTime:
+
+<Steps>
+  <Step title="Use Blocklist">
+    Add sensitive sites (banking, health, etc.) to the blocklist before visiting them
+  </Step>
+  
+  <Step title="Regular Exports">
+    Export your data regularly and store backups securely
+  </Step>
+  
+  <Step title="Shorter Retention">
+    Set raw log retention to 7 days if you're concerned about storage
+  </Step>
+  
+  <Step title="Device Security">
+    Enable device encryption and use a strong browser profile password
+  </Step>
+  
+  <Step title="Delete When Needed">
+    Use the delete feature to remove specific sites from your history
+  </Step>
+</Steps>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Blocklist" icon="ban" href="/features/blocklist">
+    Prevent tracking of sensitive sites
+  </Card>
+  <Card title="Data Management" icon="database" href="/features/data-management">
+    Export, import, and delete your data
+  </Card>
+  <Card title="Session Tracking" icon="clock" href="/features/session-tracking">
+    How browsing sessions are tracked
+  </Card>
+  <Card title="Analytics" icon="chart-line" href="/features/analytics">
+    View your time analytics dashboard
+  </Card>
+</CardGroup>

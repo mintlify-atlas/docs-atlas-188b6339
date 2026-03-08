@@ -1,0 +1,279 @@
+---
+title: Architecture
+description: System architecture, tech stack, and how LuminTime components work together
+---
+
+## Overview
+
+LuminTime is a privacy-first browser extension built with modern web technologies. All tracking data stays locally in IndexedDB—no cloud services, no accounts, no external servers.
+
+## Tech Stack
+
+### Core Framework
+- **WXT (Web Extension Toolkit)**: Modern framework for building cross-browser extensions
+- **Vue 3**: Reactive UI framework with Composition API
+- **TypeScript**: Type-safe development with full IDE support
+
+### Data Layer
+- **Dexie.js**: IndexedDB wrapper for local storage
+- **Arktype**: Runtime type validation for data integrity
+
+### UI & Styling
+- **Tailwind CSS 4**: Utility-first styling with modern features
+- **DaisyUI 5**: Component library built on Tailwind
+- **Iconify**: Icon system via `@iconify/vue`
+
+### Development Tools
+- **Vitest**: Fast unit testing framework
+- **Oxlint**: High-performance linter with type-aware rules
+- **Oxfmt**: Fast code formatter
+- **Vue TSC**: TypeScript type checking for Vue components
+
+## Project Structure
+
+```
+src/
+├── entrypoints/          # Extension entry points
+│   ├── background.ts     # Background service worker
+│   └── popup/            # Extension popup UI
+│       ├── main.ts       # Vue app initialization
+│       ├── App.vue       # Root component
+│       ├── router.ts     # Vue Router configuration
+│       └── pages/        # View components
+├── components/           # Reusable Vue components
+├── db/                   # Database layer
+│   ├── index.ts          # Dexie schema definition
+│   ├── types.ts          # Data models with Arktype
+│   ├── service.ts        # Core data operations
+│   ├── retention.ts      # Data cleanup jobs
+│   ├── blocklist.ts      # Domain blocking
+│   └── insights.ts       # Analytics queries
+├── composables/          # Vue composables
+├── utils/                # Utility functions
+│   └── SessionManager.ts # Activity tracking logic
+└── assets/               # Static assets
+
+tests/                    # Unit tests
+├── db/                   # Database tests
+├── utils/                # Utility tests
+└── components/           # Component tests
+```
+
+## Architecture Layers
+
+### 1. Background Service Worker
+
+The background service worker (`src/entrypoints/background.ts`) is the core of activity tracking:
+
+```typescript
+// Key responsibilities:
+// - Listen to browser events (tabs, windows, navigation, idle)
+// - Track active sessions via SessionManager
+// - Record activity to IndexedDB
+// - Run periodic cleanup jobs
+// - Manage domain blocklist
+
+export default defineBackground(() => {
+  const sessionManager = new SessionManager({
+    storage: sessionStorage,
+    recordActivity,
+    alarmName: SESSION_TICK_ALARM_NAME,
+    alarmPeriodInMinutes: SESSION_PER_MINUTE,
+    isUrlBlocked,
+  });
+
+  // Event listeners for:
+  browser.tabs.onActivated.addListener(...);      // Tab switches
+  browser.webNavigation.onCompleted.addListener(...); // Page loads
+  browser.windows.onFocusChanged.addListener(...); // Window focus
+  browser.idle.onStateChanged.addListener(...);    // Idle detection
+  browser.alarms.onAlarm.addListener(...);         // Periodic ticks
+});
+```
+
+**Key Features:**
+- Idle detection every 30 seconds
+- Session updates every minute via alarms
+- Automatic data retention cleanup every 60 minutes
+- Domain blocklist caching for performance
+
+### 2. Session Management
+
+The `SessionManager` class handles activity tracking state:
+
+```typescript
+class SessionManager {
+  handleEvent(type: 'switch' | 'idle' | 'alarm', data?: {
+    url: string | null,
+    title?: string,
+    eventSource?: EventSource
+  }): void
+}
+```
+
+**Event Types:**
+- `switch`: Tab activation or navigation
+- `idle`: Browser focus change or idle state
+- `alarm`: Periodic session update
+
+### 3. Database Layer
+
+Three-layer data model optimized for different query patterns (see [Database Schema](/developer/database)):
+
+- **L1 (history)**: Raw activity logs for audit trail
+- **L2 (sites)**: Site-level aggregates for dashboard
+- **L3 (pages)**: Page-level details for drill-down analysis
+
+### 4. UI Layer
+
+Vue 3 SPA with Vue Router:
+
+```typescript
+// src/entrypoints/popup/router.ts
+const routes = [
+  { path: '/', component: HomeView },           // Dashboard
+  { path: '/history', component: HistoryView }, // Activity log
+  { path: '/insights', component: InsightsView }, // Analytics
+  { path: '/site/:hostname', component: SiteDetailView },
+  { path: '/settings', component: SettingsView },
+];
+```
+
+## Data Flow
+
+<Steps>
+  <Step title="Browser Event Occurs">
+    User switches tabs, navigates to a page, or browser detects idle state.
+  </Step>
+  
+  <Step title="Background Worker Captures Event">
+    Event listeners in `background.ts` receive the browser event and extract URL/title.
+  </Step>
+  
+  <Step title="SessionManager Processes State">
+    - Checks if URL is blocked
+    - Calculates duration of previous session
+    - Stores session data via `recordActivity()`
+    - Starts tracking new session
+  </Step>
+  
+  <Step title="Database Service Writes Data">
+    `db/service.ts` writes to three layers:
+    - Creates history log entry (L1)
+    - Updates or creates site aggregate (L2)
+    - Updates or creates page detail (L3)
+  </Step>
+  
+  <Step title="UI Queries and Displays">
+    Vue components query IndexedDB via Dexie:
+    - Dashboard queries L2 for site rankings
+    - Detail views query L3 for page breakdowns
+    - History view queries L1 for raw logs
+  </Step>
+</Steps>
+
+## Extension Permissions
+
+Defined in `wxt.config.ts`:
+
+```typescript
+manifest: {
+  permissions: [
+    "tabs",         // Read active tab info
+    "storage",      // Store settings and session data
+    "webNavigation", // Detect page loads
+    "idle",         // Detect idle state
+    "alarms",       // Periodic session updates
+  ],
+}
+```
+
+## Cross-Browser Support
+
+WXT handles browser-specific differences automatically:
+
+- Chrome/Edge: Manifest V3 with service worker
+- Firefox: Manifest V2/V3 compatibility
+- Automatic polyfills for browser API differences
+
+## Performance Considerations
+
+### Indexed Queries
+
+All database tables use compound indexes for efficient queries:
+
+```typescript
+history: "++id, date, [date+hostname], startTime"
+sites: "[date+hostname], date, hostname, duration"
+pages: "[date+hostname+path], date, [date+hostname], duration"
+```
+
+### Batch Operations
+
+The `recordActivity` function uses Dexie transactions to write all three layers atomically.
+
+### Memory Management
+
+- Background worker maintains minimal state
+- Active session stored in extension storage API
+- Blocklist cached in memory, refreshed on updates
+
+## Configuration
+
+### WXT Configuration
+
+From `wxt.config.ts`:
+
+```typescript
+export default defineConfig({
+  srcDir: "./src",
+  modules: [
+    "@wxt-dev/module-vue",    // Vue 3 support
+    "@wxt-dev/auto-icons",    // Automatic icon generation
+  ],
+  webExt: {
+    disabled: true,             // Disable auto browser launch
+  },
+  vite: () => ({
+    plugins: [tailwindcss()],   // Tailwind CSS integration
+  }),
+});
+```
+
+### Runtime Dependencies
+
+From `package.json`:
+
+```json
+{
+  "dependencies": {
+    "@tanstack/pacer": "^0.19.0",     // Animation utilities
+    "@vueuse/core": "^14.2.1",        // Vue composition utilities
+    "arktype": "^2.1.29",             // Runtime type validation
+    "dexie": "^4.3.0",                // IndexedDB wrapper
+    "es-toolkit": "^1.44.0",          // Lodash alternative
+    "motion-v": "^2.0.0-beta.4",      // Vue animations
+    "pretty-ms": "^9.3.0",            // Duration formatting
+    "tldts": "^7.0.23",               // Domain parsing
+    "vue": "^3.5.28",
+    "vue-router": "^5.0.3"
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Database Schema" icon="database" href="/developer/database">
+    Learn about the three-layer data model and IndexedDB schema
+  </Card>
+  <Card title="Development Setup" icon="code" href="/developer/development">
+    Get started with local development
+  </Card>
+  <Card title="Testing" icon="flask" href="/developer/testing">
+    Write and run tests with Vitest
+  </Card>
+  <Card title="Building" icon="hammer" href="/developer/building">
+    Build and package the extension
+  </Card>
+</CardGroup>

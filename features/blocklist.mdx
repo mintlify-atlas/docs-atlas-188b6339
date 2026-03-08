@@ -1,0 +1,582 @@
+---
+title: 'Site Blocklist'
+description: 'Exclude specific domains from tracking to protect sensitive browsing'
+icon: 'ban'
+---
+
+## Overview
+
+The blocklist feature allows you to exclude specific websites from being tracked. Sites on the blocklist are never recorded to the database, providing an easy way to protect sensitive browsing activity.
+
+<Note>
+Blocklisted sites are checked **before** any data is recorded. Once a site is blocked, no URLs, titles, or durations for that domain will be saved.
+</Note>
+
+## How it Works
+
+### Blocklist Architecture
+
+The blocklist is stored in the `meta` table and cached by the background service worker:
+
+```typescript
+// From background.ts
+let cachedBlocklist: string[] = [];
+
+const refreshBlocklist = () => {
+  getBlocklist()
+    .then((list) => {
+      cachedBlocklist = list;
+      console.log('Blocklist refreshed:', list.length, 'entries');
+    })
+    .catch((error) => {
+      console.error('Failed to load blocklist:', error);
+    });
+};
+
+const isUrlBlocked = (url: string): boolean => {
+  try {
+    const { hostname } = new URL(url);
+    return isHostnameBlocked(hostname.toLowerCase().replace(/^www\./, ''), cachedBlocklist);
+  } catch {
+    return false;
+  }
+};
+```
+
+The SessionManager checks the blocklist before starting a new session:
+
+```typescript
+const sessionManager = new SessionManager({
+  storage: sessionStorage,
+  recordActivity,
+  alarmName: SESSION_TICK_ALARM_NAME,
+  alarmPeriodInMinutes: SESSION_PER_MINUTE,
+  isUrlBlocked, // Blocklist checker
+});
+```
+
+### Hostname Normalization
+
+All hostnames are normalized before storage and comparison:
+
+```typescript
+export function normalizeBlockInput(input: string): string {
+  let value = input.trim().toLowerCase();
+  if (!value) return '';
+  
+  // Remove wildcard prefix
+  if (value.startsWith('*.')) {
+    value = value.slice(2);
+  }
+  
+  // Extract hostname from URL
+  if (value.includes('://') || value.startsWith('//')) {
+    try {
+      const urlStr = value.startsWith('//') ? `https:${value}` : value;
+      value = new URL(urlStr).hostname;
+    } catch {
+      // Keep raw value when URL parsing fails
+    }
+  }
+  
+  // Remove path
+  const slashIndex = value.indexOf('/');
+  if (slashIndex !== -1) {
+    value = value.slice(0, slashIndex);
+  }
+  
+  // Remove www prefix
+  return value.replace(/^www\./, '');
+}
+```
+
+This allows flexible input formats:
+
+<CardGroup cols={2}>
+  <Card title="Domain Only" icon="globe">
+    `example.com` → `example.com`
+  </Card>
+  <Card title="With www" icon="w">
+    `www.example.com` → `example.com`
+  </Card>
+  <Card title="Full URL" icon="link">
+    `https://example.com/path` → `example.com`
+  </Card>
+  <Card title="Wildcard" icon="asterisk">
+    `*.example.com` → `example.com`
+  </Card>
+</CardGroup>
+
+<Info>
+You can paste any URL format and it will be automatically normalized to the root domain.
+</Info>
+
+## Adding Sites to Blocklist
+
+### Via Settings UI
+
+<Steps>
+  <Step title="Open Settings">
+    Click the settings icon in the extension popup
+  </Step>
+  
+  <Step title="Find Blocked Sites Section">
+    Scroll to the "Blocked Sites" section
+  </Step>
+  
+  <Step title="Enter Domain or URL">
+    Type the domain name or paste a full URL in the input field
+  </Step>
+  
+  <Step title="Click Add">
+    Press the "Add" button to add the site to the blocklist
+  </Step>
+</Steps>
+
+The UI shows real-time validation:
+
+```vue
+<form class="flex gap-2" @submit.prevent="handleAddBlock">
+  <input
+    v-model="newBlockHostname"
+    type="text"
+    class="input input-sm input-bordered flex-1"
+    placeholder="e.g. facebook.com or https://example.com"
+  />
+  <button
+    type="submit"
+    class="btn btn-sm btn-primary"
+    :disabled="!newBlockHostname.trim()"
+  >
+    Add
+  </button>
+</form>
+```
+
+### Programmatic API
+
+You can also manage the blocklist programmatically:
+
+```typescript
+import { addToBlocklist, removeFromBlocklist, getBlocklist } from '@/db/blocklist';
+
+// Add a site
+const added = await addToBlocklist('example.com');
+if (added) {
+  console.log('Site added to blocklist');
+} else {
+  console.log('Site was already on blocklist');
+}
+
+// Remove a site
+const removed = await removeFromBlocklist('example.com');
+if (removed) {
+  console.log('Site removed from blocklist');
+} else {
+  console.log('Site was not on blocklist');
+}
+
+// Get all blocked sites
+const blocklist = await getBlocklist();
+console.log('Blocked sites:', blocklist);
+```
+
+### Duplicate Prevention
+
+The system prevents duplicate entries:
+
+```typescript
+export async function addToBlocklist(input: string): Promise<boolean> {
+  const normalized = normalizeBlockInput(input);
+  if (!normalized) return false;
+  
+  return db.transaction('rw', db.meta, async () => {
+    const record = await db.meta.get(META_KEY_BLOCKLIST);
+    const current = isStringArray(record?.value) ? [...record.value] : [];
+    
+    if (current.includes(normalized)) {
+      return false; // Already exists
+    }
+    
+    current.push(normalized);
+    await db.meta.put({ key: META_KEY_BLOCKLIST, value: current });
+    return true;
+  });
+}
+```
+
+<Warning>
+Adding `example.com` after `www.example.com` won't create a duplicate - both normalize to `example.com`.
+</Warning>
+
+## Removing Sites from Blocklist
+
+### Via Settings UI
+
+Each blocked site has a remove button:
+
+```vue
+<ul v-else class="flex flex-col gap-1 max-h-40 overflow-y-auto">
+  <li
+    v-for="host in blocklist"
+    :key="host"
+    class="flex items-center justify-between gap-2 px-2 py-1.5 bg-base-100 rounded-box"
+  >
+    <span class="text-sm font-mono truncate">{{ host }}</span>
+    <button
+      class="btn btn-ghost btn-xs text-error"
+      aria-label="Remove"
+      @click="handleRemoveBlock(host)"
+    >
+      <svg class="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  </li>
+</ul>
+```
+
+<Steps>
+  <Step title="Open Settings">
+    Navigate to the settings page
+  </Step>
+  
+  <Step title="Find the Site">
+    Locate the site in the blocked sites list
+  </Step>
+  
+  <Step title="Click Remove (X)">
+    Click the red X button next to the site
+  </Step>
+  
+  <Step title="Immediate Effect">
+    The site is removed and tracking resumes immediately
+  </Step>
+</Steps>
+
+### Bulk Management
+
+For managing many sites at once, use the programmatic API:
+
+```typescript
+import { setBlocklist } from '@/db/blocklist';
+
+// Replace entire blocklist
+await setBlocklist(['facebook.com', 'twitter.com', 'reddit.com']);
+
+// Clear blocklist
+await setBlocklist([]);
+```
+
+<Note>
+`setBlocklist()` replaces the entire blocklist, while `addToBlocklist()` and `removeFromBlocklist()` modify individual entries.
+</Note>
+
+## Background Sync
+
+When you modify the blocklist, the background service worker is notified:
+
+```typescript
+export function notifyBlocklistUpdate(): void {
+  browser.runtime.sendMessage('blocklist-updated').catch(() => {
+    // Background service worker may not be active yet; safe to ignore
+  });
+}
+
+const handleAddBlock = async () => {
+  const hostname = newBlockHostname.value.trim().toLowerCase();
+  if (!hostname) return;
+  
+  const added = await addToBlocklist(hostname);
+  if (added) {
+    blocklist.value = await getBlocklist();
+    notifyBlocklistUpdate(); // Notify background
+  }
+  newBlockHostname.value = '';
+};
+```
+
+The background worker listens for updates:
+
+```typescript
+browser.runtime.onMessage.addListener((message) => {
+  if (message === 'blocklist-updated') {
+    refreshBlocklist();
+  }
+});
+```
+
+<Info>
+Blocklist changes take effect immediately - no extension restart required.
+</Info>
+
+## Blocklist Checking Flow
+
+Here's the complete flow when a new URL is encountered:
+
+<Steps>
+  <Step title="URL Event Triggered">
+    User navigates to a new page or switches tabs
+  </Step>
+  
+  <Step title="Extract Hostname">
+    URL is parsed and hostname extracted (e.g., `www.example.com`)
+  </Step>
+  
+  <Step title="Normalize Hostname">
+    Hostname is normalized (e.g., `example.com`)
+  </Step>
+  
+  <Step title="Check Blocklist">
+    Normalized hostname is compared against cached blocklist
+  </Step>
+  
+  <Step title="Decision">
+    - If blocked: Session is not started, no data recorded
+    - If not blocked: Session starts normally
+  </Step>
+</Steps>
+
+```typescript
+private async _executeTransition(
+  data?: { url: string | null; title?: string },
+  eventSource?: EventSource
+) {
+  try {
+    // 1. End current session
+    const session = await this.deps.storage.getValue();
+    await this._endSession(session);
+    
+    // 2. Start new session if URL is valid and not blocked
+    const hasNewTarget = typeof data?.url === 'string' && data.url.length > 0;
+    const isBlocked = hasNewTarget && this.deps.isUrlBlocked?.(data.url as string);
+    
+    if (hasNewTarget && !isBlocked) {
+      await this._startSession(data.url as string, data.title, eventSource);
+    } else if (this._hasActiveSession) {
+      // Transition to idle: clear alarm
+      this._hasActiveSession = false;
+      await this._clearAlarm();
+    }
+  } catch (error) {
+    console.error('Session: Error in transition', error);
+  }
+}
+```
+
+## Common Use Cases
+
+### Banking and Financial Sites
+
+Protect sensitive financial browsing:
+
+```typescript
+const financialSites = [
+  'bankofamerica.com',
+  'chase.com',
+  'wellsfargo.com',
+  'paypal.com',
+  'venmo.com'
+];
+
+for (const site of financialSites) {
+  await addToBlocklist(site);
+}
+```
+
+### Healthcare and Medical
+
+Keep health-related browsing private:
+
+```typescript
+const healthcareSites = [
+  'webmd.com',
+  'mayoclinic.org',
+  'healthcare.gov'
+];
+
+for (const site of healthcareSites) {
+  await addToBlocklist(site);
+}
+```
+
+### Personal Social Media
+
+Exclude personal social accounts:
+
+```typescript
+await addToBlocklist('facebook.com');
+await addToBlocklist('instagram.com');
+await addToBlocklist('twitter.com');
+```
+
+### Work-Related Restrictions
+
+Block competitor sites if required:
+
+```typescript
+await addToBlocklist('competitor1.com');
+await addToBlocklist('competitor2.com');
+```
+
+<Warning>
+Remember that blocklisting is preventative - existing data for a site is not removed when you add it to the blocklist. Use the delete feature in the site detail view to remove historical data.
+</Warning>
+
+## Blocklist Storage
+
+The blocklist is stored in the `meta` table:
+
+```typescript
+const META_KEY_BLOCKLIST = 'blocklist.hostnames';
+
+export async function getBlocklist(): Promise<string[]> {
+  const record = await db.meta.get(META_KEY_BLOCKLIST);
+  return isStringArray(record?.value) ? record.value : [];
+}
+
+export async function setBlocklist(hostnames: string[]): Promise<void> {
+  const sanitizedHostnames = sanitizeHostnameList(hostnames);
+  await db.meta.put({ key: META_KEY_BLOCKLIST, value: sanitizedHostnames });
+}
+```
+
+Storage format:
+
+```json
+{
+  "key": "blocklist.hostnames",
+  "value": [
+    "facebook.com",
+    "twitter.com",
+    "bankofamerica.com"
+  ]
+}
+```
+
+### Export and Import
+
+The blocklist is **not** included in data exports. This is intentional:
+
+- Blocklist is configuration, not data
+- Prevents accidental exposure of sensitive site lists
+- Keeps exports focused on time tracking data
+
+<Info>
+If you need to backup your blocklist, export the entire extension data from your browser's extension management page.
+</Info>
+
+## Performance Considerations
+
+### Cached Blocklist
+
+The background service worker caches the blocklist in memory:
+
+```typescript
+let cachedBlocklist: string[] = [];
+
+const refreshBlocklist = () => {
+  getBlocklist()
+    .then((list) => {
+      cachedBlocklist = list;
+    });
+};
+
+// Load on startup
+refreshBlocklist();
+
+// Refresh on update
+browser.runtime.onMessage.addListener((message) => {
+  if (message === 'blocklist-updated') {
+    refreshBlocklist();
+  }
+});
+```
+
+Benefits:
+- O(1) array lookup instead of database query
+- No async overhead on every URL check
+- Minimal memory footprint (typical blocklist: &lt;1 KB)
+
+### Linear Search
+
+Blocklist checking uses linear search:
+
+```typescript
+export function isHostnameBlocked(hostname: string, blocklist: string[]): boolean {
+  const normalized = normalizeBlockInput(hostname);
+  return blocklist.includes(normalized);
+}
+```
+
+This is efficient because:
+- Typical blocklists have &lt;100 entries
+- Check happens only on tab switch/navigation (not continuous)
+- Array.includes() is optimized by JavaScript engines
+
+<Note>
+Even with 1,000 blocked sites, the performance impact is negligible due to caching and infrequent checks.
+</Note>
+
+## Limitations
+
+### Subdomain Handling
+
+The blocklist operates on root domains only:
+
+- Blocking `example.com` blocks `www.example.com` (www is stripped)
+- Blocking `example.com` does **not** block `api.example.com`
+- To block all subdomains, add each one individually
+
+<Warning>
+There is currently no wildcard support for subdomains. `*.example.com` will be normalized to `example.com` and only block the root domain.
+</Warning>
+
+### Retroactive Effect
+
+Blocklisting does not affect existing data:
+
+```typescript
+// This doesn't delete existing data
+await addToBlocklist('example.com');
+
+// Existing history for example.com remains in database
+const existingData = await db.history
+  .where('hostname')
+  .equals('example.com')
+  .toArray();
+console.log(existingData); // May still contain records
+```
+
+To remove existing data:
+
+<Steps>
+  <Step title="Add to Blocklist">
+    Add the site to blocklist to prevent future tracking
+  </Step>
+  
+  <Step title="Navigate to Site Detail">
+    Open the site from the home view
+  </Step>
+  
+  <Step title="Delete Site Data">
+    Use the delete button to remove all historical data
+  </Step>
+</Steps>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Privacy" icon="shield" href="/features/privacy">
+    Learn about privacy protections
+  </Card>
+  <Card title="Session Tracking" icon="clock" href="/features/session-tracking">
+    Understand how sessions are tracked
+  </Card>
+  <Card title="Analytics" icon="chart-line" href="/features/analytics">
+    View your time analytics
+  </Card>
+  <Card title="Data Management" icon="database" href="/features/data-management">
+    Delete specific site data
+  </Card>
+</CardGroup>

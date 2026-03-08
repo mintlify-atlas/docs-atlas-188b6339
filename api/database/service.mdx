@@ -1,0 +1,517 @@
+---
+title: Database Service
+description: Core database service functions for recording activity and querying statistics
+---
+
+The database service module provides functions for recording browsing activity and querying aggregated statistics across different time periods.
+
+## Recording Activity
+
+### recordActivity
+
+Records browsing activity for a URL, splitting duration across midnight boundaries if necessary.
+
+<ParamField path="rawUrl" type="string" required>
+  The full URL to record activity for
+</ParamField>
+
+<ParamField path="durationToAdd" type="number" required>
+  Duration in milliseconds to add to the activity record
+</ParamField>
+
+<ParamField path="title" type="string">
+  Page title (optional)
+</ParamField>
+
+<ParamField path="startTime" type="number">
+  Start timestamp in milliseconds. If not provided, calculated as `Date.now() - durationToAdd`
+</ParamField>
+
+<ParamField path="eventSource" type="EventSource">
+  Source of the activity event. One of: `"tab_activated"`, `"navigation"`, `"window_focus"`, `"idle_resume"`, `"alarm"`
+</ParamField>
+
+```typescript
+import { recordActivity } from '@/db/service';
+
+// Record 5 seconds of activity on a page
+await recordActivity(
+  'https://example.com/page',
+  5000,
+  'Example Page',
+  Date.now() - 5000,
+  'tab_activated'
+);
+```
+
+<Info>
+This function automatically:
+- Filters out non-HTTP(S) URLs
+- Normalizes URLs to extract hostname and path
+- Splits activity across midnight boundaries
+- Updates history, sites, and pages tables in a single transaction
+</Info>
+
+---
+
+## Querying Statistics
+
+### getAggregatedSites
+
+Get top sites by duration for a date range.
+
+<ParamField path="startDate" type="string" required>
+  Start date in YYYY-MM-DD format (inclusive)
+</ParamField>
+
+<ParamField path="endDate" type="string" required>
+  End date in YYYY-MM-DD format (inclusive)
+</ParamField>
+
+<ParamField path="limit" type="number" default="50">
+  Maximum number of sites to return
+</ParamField>
+
+<ResponseField name="ISiteStat[]" type="array">
+  Array of site statistics, sorted by duration (descending)
+  
+  <ResponseField name="hostname" type="string">
+    The site hostname (e.g., "example.com")
+  </ResponseField>
+  
+  <ResponseField name="date" type="string">
+    Date in YYYY-MM-DD format
+  </ResponseField>
+  
+  <ResponseField name="duration" type="number">
+    Total duration in milliseconds
+  </ResponseField>
+  
+  <ResponseField name="lastVisit" type="number">
+    Timestamp of last visit
+  </ResponseField>
+  
+  <ResponseField name="iconUrl" type="string" optional>
+    Site favicon URL
+  </ResponseField>
+</ResponseField>
+
+```typescript
+import { getAggregatedSites } from '@/db/service';
+
+// Get top 10 sites for the last week
+const sites = await getAggregatedSites('2026-03-01', '2026-03-07', 10);
+console.log(sites); // [{ hostname: 'github.com', duration: 3600000, ... }]
+```
+
+---
+
+### getDailyTrend
+
+Get daily duration trend for a date range.
+
+<ParamField path="startDate" type="string" required>
+  Start date in YYYY-MM-DD format (inclusive)
+</ParamField>
+
+<ParamField path="endDate" type="string" required>
+  End date in YYYY-MM-DD format (inclusive)
+</ParamField>
+
+<ResponseField name="{date, duration}[]" type="array">
+  Array of daily trend data, sorted by date (ascending)
+  
+  <ResponseField name="date" type="string">
+    Date in YYYY-MM-DD format
+  </ResponseField>
+  
+  <ResponseField name="duration" type="number">
+    Total duration for that day in milliseconds
+  </ResponseField>
+</ResponseField>
+
+```typescript
+import { getDailyTrend } from '@/db/service';
+
+const trend = await getDailyTrend('2026-03-01', '2026-03-07');
+console.log(trend);
+// [{ date: '2026-03-01', duration: 7200000 }, { date: '2026-03-02', duration: 5400000 }, ...]
+```
+
+---
+
+### getRangeStats
+
+Get both top sites and daily trend for a date range in a single query.
+
+<ParamField path="startDate" type="string" required>
+  Start date in YYYY-MM-DD format (inclusive)
+</ParamField>
+
+<ParamField path="endDate" type="string" required>
+  End date in YYYY-MM-DD format (inclusive)
+</ParamField>
+
+<ParamField path="limit" type="number" default="50">
+  Maximum number of sites to return
+</ParamField>
+
+<ResponseField name="sites" type="ISiteStat[]">
+  Top sites by duration (see getAggregatedSites for structure)
+</ResponseField>
+
+<ResponseField name="trend" type="{date, duration}[]">
+  Daily trend data (see getDailyTrend for structure)
+</ResponseField>
+
+```typescript
+import { getRangeStats } from '@/db/service';
+
+const stats = await getRangeStats('2026-03-01', '2026-03-07', 20);
+console.log(stats.sites); // Top 20 sites
+console.log(stats.trend); // Daily trend for the week
+```
+
+<Tip>
+Use `getRangeStats` instead of calling `getAggregatedSites` and `getDailyTrend` separately to reduce database queries.
+</Tip>
+
+---
+
+### getHourlyTrend
+
+Get hourly activity trend for a specific day.
+
+<ParamField path="date" type="string" required>
+  Date in YYYY-MM-DD format
+</ParamField>
+
+<ResponseField name="{hour, duration}[]" type="array">
+  Array of 24 hourly entries (0-23)
+  
+  <ResponseField name="hour" type="string">
+    Hour of day as string ("0" to "23")
+  </ResponseField>
+  
+  <ResponseField name="duration" type="number">
+    Total duration for that hour in milliseconds
+  </ResponseField>
+</ResponseField>
+
+```typescript
+import { getHourlyTrend } from '@/db/service';
+
+const hourly = await getHourlyTrend('2026-03-07');
+console.log(hourly);
+// [{ hour: '0', duration: 0 }, { hour: '1', duration: 0 }, ..., { hour: '14', duration: 1800000 }, ...]
+```
+
+---
+
+### getAggregatedPages
+
+Get aggregated page statistics for a specific site.
+
+<ParamField path="hostname" type="string" required>
+  Site hostname (e.g., "github.com")
+</ParamField>
+
+<ParamField path="startDate" type="string" required>
+  Start date in YYYY-MM-DD format (inclusive)
+</ParamField>
+
+<ParamField path="endDate" type="string" required>
+  End date in YYYY-MM-DD format (inclusive)
+</ParamField>
+
+<ResponseField name="IPageStat[]" type="array">
+  Array of page statistics, sorted by duration (descending)
+  
+  <ResponseField name="path" type="string">
+    URL path
+  </ResponseField>
+  
+  <ResponseField name="hostname" type="string">
+    Site hostname
+  </ResponseField>
+  
+  <ResponseField name="date" type="string">
+    Date in YYYY-MM-DD format
+  </ResponseField>
+  
+  <ResponseField name="fullPath" type="string">
+    Complete URL path for display
+  </ResponseField>
+  
+  <ResponseField name="duration" type="number">
+    Total duration in milliseconds
+  </ResponseField>
+  
+  <ResponseField name="title" type="string" optional>
+    Page title
+  </ResponseField>
+</ResponseField>
+
+```typescript
+import { getAggregatedPages } from '@/db/service';
+
+const pages = await getAggregatedPages('github.com', '2026-03-01', '2026-03-07');
+console.log(pages);
+// [{ path: '/trending', hostname: 'github.com', duration: 1800000, ... }]
+```
+
+---
+
+### getHistoryLogs
+
+Get raw history log entries for a date range, optionally filtered by hostname and path.
+
+<ParamField path="startDate" type="string" required>
+  Start date in YYYY-MM-DD format (inclusive)
+</ParamField>
+
+<ParamField path="endDate" type="string" required>
+  End date in YYYY-MM-DD format (inclusive)
+</ParamField>
+
+<ParamField path="hostname" type="string">
+  Filter by hostname (optional)
+</ParamField>
+
+<ParamField path="path" type="string">
+  Filter by path (optional, requires hostname)
+</ParamField>
+
+<ParamField path="limit" type="number" default="2000">
+  Maximum number of records to return
+</ParamField>
+
+<ResponseField name="IHistoryLog[]" type="array">
+  Array of raw history entries, sorted by startTime (descending)
+  
+  <ResponseField name="id" type="number" optional>
+    Auto-incremented primary key
+  </ResponseField>
+  
+  <ResponseField name="date" type="string">
+    Date in YYYY-MM-DD format
+  </ResponseField>
+  
+  <ResponseField name="hostname" type="string">
+    Site hostname
+  </ResponseField>
+  
+  <ResponseField name="path" type="string">
+    URL path
+  </ResponseField>
+  
+  <ResponseField name="startTime" type="number">
+    Activity start timestamp
+  </ResponseField>
+  
+  <ResponseField name="duration" type="number">
+    Duration in milliseconds
+  </ResponseField>
+  
+  <ResponseField name="title" type="string" optional>
+    Page title
+  </ResponseField>
+  
+  <ResponseField name="eventSource" type="EventSource" optional>
+    Source of the activity event
+  </ResponseField>
+</ResponseField>
+
+```typescript
+import { getHistoryLogs } from '@/db/service';
+
+// Get all history for a date range
+const allHistory = await getHistoryLogs('2026-03-01', '2026-03-07');
+
+// Get history for a specific site
+const siteHistory = await getHistoryLogs('2026-03-01', '2026-03-07', 'github.com');
+
+// Get history for a specific page
+const pageHistory = await getHistoryLogs('2026-03-01', '2026-03-07', 'github.com', '/trending');
+```
+
+---
+
+## Convenience Functions
+
+### getTodayTopSites
+
+Get top sites for today.
+
+<ParamField path="limit" type="number" default="10">
+  Maximum number of sites to return
+</ParamField>
+
+```typescript
+import { getTodayTopSites } from '@/db/service';
+
+const topSites = await getTodayTopSites(5);
+```
+
+---
+
+### getSitePagesDetail
+
+Get page details for a site today.
+
+<ParamField path="hostname" type="string" required>
+  Site hostname
+</ParamField>
+
+```typescript
+import { getSitePagesDetail } from '@/db/service';
+
+const pages = await getSitePagesDetail('github.com');
+```
+
+---
+
+## Data Management
+
+### deleteSiteData
+
+Delete all data for a specific site (history, site stats, and page stats).
+
+<ParamField path="hostname" type="string" required>
+  Site hostname to delete
+</ParamField>
+
+```typescript
+import { deleteSiteData } from '@/db/service';
+
+await deleteSiteData('example.com');
+```
+
+<Warning>
+This operation is irreversible and deletes all history, site stats, and page stats for the specified hostname.
+</Warning>
+
+---
+
+## Helper Functions
+
+### addSiteDuration
+
+Merge site statistics into a map, aggregating durations.
+
+<ParamField path="map" type="Map<string, ISiteStat>" required>
+  Map to update with site statistics
+</ParamField>
+
+<ParamField path="stat" type="ISiteStat" required>
+  Site statistic to merge
+</ParamField>
+
+```typescript
+import { addSiteDuration } from '@/db/service';
+
+const siteMap = new Map();
+addSiteDuration(siteMap, { hostname: 'github.com', duration: 3600000, ... });
+addSiteDuration(siteMap, { hostname: 'github.com', duration: 1800000, ... });
+// siteMap now has github.com with duration: 5400000
+```
+
+---
+
+### getSortedTopSites
+
+Sort sites by duration and return top N.
+
+<ParamField path="map" type="Map<string, ISiteStat>" required>
+  Map of site statistics
+</ParamField>
+
+<ParamField path="limit" type="number" required>
+  Maximum number of sites to return
+</ParamField>
+
+```typescript
+import { getSortedTopSites } from '@/db/service';
+
+const topSites = getSortedTopSites(siteMap, 10);
+```
+
+---
+
+### buildDailyMap
+
+Build a map of dates initialized to zero duration.
+
+<ParamField path="startDate" type="string" required>
+  Start date in YYYY-MM-DD format
+</ParamField>
+
+<ParamField path="endDate" type="string" required>
+  End date in YYYY-MM-DD format
+</ParamField>
+
+```typescript
+import { buildDailyMap } from '@/db/service';
+
+const dailyMap = buildDailyMap('2026-03-01', '2026-03-07');
+// Map with entries for each day: { '2026-03-01' => 0, '2026-03-02' => 0, ... }
+```
+
+---
+
+### toSortedTrend
+
+Convert a daily map to a sorted array of trend data.
+
+<ParamField path="dailyMap" type="Map<string, number>" required>
+  Map of date to duration
+</ParamField>
+
+```typescript
+import { toSortedTrend } from '@/db/service';
+
+const trend = toSortedTrend(dailyMap);
+// [{ date: '2026-03-01', duration: 7200000 }, ...]
+```
+
+---
+
+### splitByMidnight
+
+Split an activity duration across midnight boundaries.
+
+<ParamField path="startTime" type="number" required>
+  Activity start timestamp
+</ParamField>
+
+<ParamField path="duration" type="number" required>
+  Duration in milliseconds
+</ParamField>
+
+<ResponseField name="DaySplit[]" type="array">
+  Array of day splits (max 2 entries)
+  
+  <ResponseField name="date" type="string">
+    Date in YYYY-MM-DD format
+  </ResponseField>
+  
+  <ResponseField name="startTime" type="number">
+    Start timestamp for this split
+  </ResponseField>
+  
+  <ResponseField name="duration" type="number">
+    Duration for this split in milliseconds
+  </ResponseField>
+</ResponseField>
+
+```typescript
+import { splitByMidnight } from '@/db/service';
+
+// Activity from 11:45 PM to 12:15 AM next day
+const splits = splitByMidnight(new Date('2026-03-07T23:45:00').getTime(), 30 * 60 * 1000);
+console.log(splits);
+// [
+//   { date: '2026-03-07', startTime: ..., duration: 900000 },  // 15 min
+//   { date: '2026-03-08', startTime: ..., duration: 900000 }   // 15 min
+// ]
+```

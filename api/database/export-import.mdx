@@ -1,0 +1,385 @@
+---
+title: Export & Import
+description: Functions for exporting and importing database data for backup and migration
+---
+
+The export/import module provides functions to export all database data to a portable format and import it back, enabling backup, migration, and data portability.
+
+## Data Structure
+
+### IExportData
+
+Structure of exported database data.
+
+```typescript
+interface IExportData {
+  version: number;
+  exportedAt: string;
+  history: IHistoryLog[];
+  sites: ISiteStat[];
+  pages: IPageStat[];
+}
+```
+
+<ResponseField name="version" type="number">
+  Export format version (currently 1)
+</ResponseField>
+
+<ResponseField name="exportedAt" type="string">
+  ISO 8601 timestamp of when the export was created
+</ResponseField>
+
+<ResponseField name="history" type="IHistoryLog[]">
+  Array of all raw history log entries
+</ResponseField>
+
+<ResponseField name="sites" type="ISiteStat[]">
+  Array of all site statistics
+</ResponseField>
+
+<ResponseField name="pages" type="IPageStat[]">
+  Array of all page statistics
+</ResponseField>
+
+---
+
+## Export Functions
+
+### exportAllData
+
+Export all database data to a portable JavaScript object.
+
+**Returns:** `Promise<IExportData>`
+
+Complete database export including history, sites, and pages.
+
+```typescript
+import { exportAllData } from '@/db/exportImport';
+
+// Export all data
+const exportData = await exportAllData();
+
+console.log(exportData);
+// {
+//   version: 1,
+//   exportedAt: '2026-03-07T10:30:00.000Z',
+//   history: [...],
+//   sites: [...],
+//   pages: [...]
+// }
+
+// Save to JSON file
+const json = JSON.stringify(exportData, null, 2);
+const blob = new Blob([json], { type: 'application/json' });
+const url = URL.createObjectURL(blob);
+
+// Trigger download
+const a = document.createElement('a');
+a.href = url;
+a.download = `lumintime-backup-${new Date().toISOString()}.json`;
+a.click();
+```
+
+<Info>
+This function performs a read-only transaction across all three tables (history, sites, pages). It does not export metadata like blocklist or settings.
+</Info>
+
+---
+
+## Import Functions
+
+### importData
+
+Import data into the database from an export file.
+
+<ParamField path="data" type="IExportData" required>
+  Export data object to import
+</ParamField>
+
+```typescript
+import { importData } from '@/db/exportImport';
+
+// Read JSON file
+const file = event.target.files[0];
+const text = await file.text();
+const data = JSON.parse(text);
+
+// Import data
+try {
+  await importData(data);
+  console.log('Import successful!');
+} catch (error) {
+  console.error('Import failed:', error);
+}
+```
+
+<Warning>
+This function uses `bulkPut()` which will:
+- **Overwrite** existing records with the same primary key
+- **Add** new records that don't exist
+- This is a merge operation, not a replace operation
+</Warning>
+
+**Validation:**
+
+The function validates the data structure before importing:
+
+```typescript
+// These will throw errors
+await importData(null); 
+// Error: Invalid data format
+
+await importData({ version: 1 }); 
+// Error: Invalid data structure: missing required arrays
+
+await importData({ history: 'not an array', sites: [], pages: [] }); 
+// Error: Invalid data structure: missing required arrays
+```
+
+---
+
+## Complete Examples
+
+### Creating a Backup System
+
+```typescript
+import { exportAllData, importData } from '@/db/exportImport';
+
+// Export with automatic filename
+async function createBackup() {
+  try {
+    const data = await exportAllData();
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const filename = `lumintime-backup-${data.exportedAt.replace(/:/g, '-')}.json`;
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    
+    URL.revokeObjectURL(url);
+    
+    console.log(`Backup created: ${filename}`);
+    return true;
+  } catch (error) {
+    console.error('Backup failed:', error);
+    return false;
+  }
+}
+```
+
+### Restoring from Backup
+
+```typescript
+import { importData } from '@/db/exportImport';
+import type { IExportData } from '@/db/exportImport';
+
+async function restoreBackup(file: File): Promise<void> {
+  // Validate file type
+  if (!file.name.endsWith('.json')) {
+    throw new Error('Invalid file type. Please select a JSON file.');
+  }
+  
+  // Read file
+  const text = await file.text();
+  let data: IExportData;
+  
+  try {
+    data = JSON.parse(text);
+  } catch (error) {
+    throw new Error('Invalid JSON file');
+  }
+  
+  // Validate structure
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid backup file format');
+  }
+  
+  if (data.version !== 1) {
+    throw new Error(`Unsupported backup version: ${data.version}`);
+  }
+  
+  // Show confirmation with stats
+  const confirmed = confirm(
+    `Restore backup from ${new Date(data.exportedAt).toLocaleString()}?\n\n` +
+    `History records: ${data.history.length}\n` +
+    `Sites: ${data.sites.length}\n` +
+    `Pages: ${data.pages.length}\n\n` +
+    `This will merge with your existing data.`
+  );
+  
+  if (!confirmed) {
+    return;
+  }
+  
+  // Import
+  await importData(data);
+  console.log('Backup restored successfully');
+}
+```
+
+### Vue Component Example
+
+```vue
+<script setup lang="ts">
+import { ref } from 'vue';
+import { exportAllData, importData } from '@/db/exportImport';
+
+const importing = ref(false);
+const exporting = ref(false);
+const fileInput = ref<HTMLInputElement>();
+
+async function handleExport() {
+  exporting.value = true;
+  try {
+    const data = await exportAllData();
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lumintime-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    alert('Export failed: ' + error.message);
+  } finally {
+    exporting.value = false;
+  }
+}
+
+async function handleImport(event: Event) {
+  const files = (event.target as HTMLInputElement).files;
+  if (!files?.length) return;
+  
+  importing.value = true;
+  try {
+    const text = await files[0].text();
+    const data = JSON.parse(text);
+    
+    await importData(data);
+    alert('Import successful!');
+    
+    // Reset file input
+    if (fileInput.value) {
+      fileInput.value.value = '';
+    }
+  } catch (error) {
+    alert('Import failed: ' + error.message);
+  } finally {
+    importing.value = false;
+  }
+}
+</script>
+
+<template>
+  <div class="space-y-4">
+    <button 
+      @click="handleExport" 
+      :disabled="exporting"
+      class="btn btn-primary"
+    >
+      {{ exporting ? 'Exporting...' : 'Export Data' }}
+    </button>
+    
+    <div>
+      <input 
+        ref="fileInput"
+        type="file" 
+        accept=".json"
+        @change="handleImport"
+        :disabled="importing"
+        class="file-input"
+      />
+      <p v-if="importing" class="text-sm text-gray-500 mt-2">
+        Importing...
+      </p>
+    </div>
+  </div>
+</template>
+```
+
+### Automatic Periodic Backups
+
+```typescript
+import { exportAllData } from '@/db/exportImport';
+import { storage } from 'wxt/storage';
+
+// Store last backup timestamp
+const BACKUP_INTERVAL = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+async function checkAndBackup() {
+  const lastBackup = await storage.getItem('local:lastBackupTime') as number | null;
+  const now = Date.now();
+  
+  if (!lastBackup || now - lastBackup > BACKUP_INTERVAL) {
+    const data = await exportAllData();
+    const json = JSON.stringify(data);
+    
+    // Store in browser storage (if space permits)
+    await storage.setItem('local:lastBackup', json);
+    await storage.setItem('local:lastBackupTime', now);
+    
+    console.log('Automatic backup created');
+  }
+}
+
+// Run on extension startup
+checkAndBackup();
+```
+
+---
+
+## Migration Between Devices
+
+<Steps>
+  <Step title="Export from source device">
+    Use `exportAllData()` to create a backup file on the original device.
+  </Step>
+  
+  <Step title="Transfer the file">
+    Move the JSON file to the target device (via cloud storage, USB, etc.).
+  </Step>
+  
+  <Step title="Import on target device">
+    Use `importData()` to restore the data on the new device.
+  </Step>
+</Steps>
+
+<Tip>
+The export format is version-controlled. Future versions of LuminTime may support automatic migration from older export formats.
+</Tip>
+
+---
+
+## Data Not Included
+
+The following data is **not** included in exports:
+
+- Blocklist settings (use blocklist API separately)
+- Extension settings/preferences
+- Hourly aggregated stats (regenerated automatically)
+- Metadata and configuration
+
+If you need to export settings, handle them separately:
+
+```typescript
+import { getBlocklist } from '@/db/blocklist';
+import { exportAllData } from '@/db/exportImport';
+
+async function exportEverything() {
+  const data = await exportAllData();
+  const blocklist = await getBlocklist();
+  
+  return {
+    ...data,
+    blocklist,
+    // Add other settings as needed
+  };
+}
+```

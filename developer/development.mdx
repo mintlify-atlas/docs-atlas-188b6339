@@ -1,0 +1,413 @@
+---
+title: Development Setup
+description: Local development environment, dev commands, and hot reload with WXT
+---
+
+## Prerequisites
+
+Before you begin, ensure you have:
+
+- **Node.js 18+** or **Bun 1.0+** (recommended)
+- A Chromium-based browser (Chrome, Edge, Brave) or Firefox
+- Git for version control
+- A code editor (VS Code recommended)
+
+<Note>
+  LuminTime uses **Bun** as the default runtime for faster installs and dev experience. You can use npm/pnpm/yarn, but commands may differ.
+</Note>
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone https://github.com/nuttycc/LuminTime.git
+    cd LuminTime
+    ```
+  </Step>
+  
+  <Step title="Install Dependencies">
+    ```bash
+    bun install
+    ```
+    
+    This installs all dependencies listed in `package.json` and runs the `postinstall` hook:
+    
+    ```json
+    "postinstall": "wxt prepare"
+    ```
+    
+    The `wxt prepare` command generates TypeScript definitions for extension APIs.
+  </Step>
+  
+  <Step title="Start Development Server">
+    ```bash
+    bun run dev
+    ```
+    
+    This launches WXT's development server with hot reload enabled.
+  </Step>
+  
+  <Step title="Load Extension in Browser">
+    **Chrome/Edge:**
+    1. Navigate to `chrome://extensions`
+    2. Enable "Developer mode" (top right)
+    3. Click "Load unpacked"
+    4. Select the `.output/chrome-mv3` folder from your project
+    
+    **Firefox:**
+    1. Navigate to `about:debugging#/runtime/this-firefox`
+    2. Click "Load Temporary Add-on"
+    3. Select any file in `.output/firefox-mv2` folder
+  </Step>
+</Steps>
+
+## Development Commands
+
+Defined in `package.json`:
+
+<CodeGroup>
+
+```bash Dev Server
+bun run dev
+# Starts WXT dev server with hot reload
+# Watches for changes and rebuilds automatically
+# Output: .output/chrome-mv3 and .output/firefox-mv2
+```
+
+```bash Type Checking
+bun run compile
+# Runs vue-tsc to check TypeScript types
+# Does not emit files (--noEmit flag)
+# Uses tsconfig.typecheck.json configuration
+```
+
+```bash Linting
+bun run lint
+# Runs oxlint with type-aware rules
+# Fast, Rust-based linter
+# Reports issues but doesn't auto-fix
+```
+
+```bash Formatting
+bun run format
+# Runs oxfmt to format code
+# Fast, Rust-based formatter
+# Formats all files in place
+```
+
+```bash Testing
+bun run test
+# Runs Vitest in run mode (non-watch)
+# Executes all tests in tests/ directory
+```
+
+</CodeGroup>
+
+## Development Workflow
+
+### Hot Reload
+
+WXT provides intelligent hot reload:
+
+<Tabs>
+  <Tab title="Content Scripts & UI">
+    **Vue components, popup, and styles reload instantly** without reloading the extension.
+    
+    Changes to:
+    - `src/components/**/*.vue`
+    - `src/entrypoints/popup/**/*`
+    - CSS/Tailwind classes
+    
+    Result: Popup UI updates immediately.
+  </Tab>
+  
+  <Tab title="Background Script">
+    **Background worker requires manual reload.**
+    
+    Changes to:
+    - `src/entrypoints/background.ts`
+    - `src/db/**/*`
+    - `src/utils/SessionManager.ts`
+    
+    Steps:
+    1. WXT rebuilds automatically
+    2. Click "Reload" in `chrome://extensions`
+    3. Extension restarts with new code
+  </Tab>
+  
+  <Tab title="Manifest Changes">
+    **Requires full extension reload.**
+    
+    Changes to:
+    - `wxt.config.ts` (manifest settings)
+    - New permissions
+    - Extension name/icons
+    
+    Steps:
+    1. WXT rebuilds
+    2. Remove extension from browser
+    3. Re-add via "Load unpacked"
+  </Tab>
+</Tabs>
+
+### File Watching
+
+WXT watches these directories:
+
+```
+src/
+├── entrypoints/     ✅ Watched (entry points)
+├── components/      ✅ Watched (imported by entrypoints)
+├── db/              ✅ Watched (imported by background)
+├── composables/     ✅ Watched (imported by Vue components)
+├── utils/           ✅ Watched (imported everywhere)
+└── assets/          ✅ Watched (static files)
+
+public/              ✅ Watched (copied to output)
+wxt.config.ts        ✅ Watched (rebuild on change)
+```
+
+## Project Configuration
+
+### WXT Config
+
+From `wxt.config.ts`:
+
+```typescript
+import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "wxt";
+
+export default defineConfig({
+  srcDir: "./src",                    // Source directory
+  modules: [
+    "@wxt-dev/module-vue",            // Vue 3 integration
+    "@wxt-dev/auto-icons",            // Auto icon generation
+  ],
+  webExt: {
+    disabled: true,                   // Don't auto-launch browser
+  },
+  manifest: {
+    name: "Lumin Time",
+    homepage_url: "https://github.com/nuttycc/LuminTime",
+    permissions: [
+      "tabs",                         // Read tab info
+      "storage",                      // Extension storage API
+      "webNavigation",                // Detect navigation events
+      "idle",                         // Idle detection
+      "alarms",                       // Periodic tasks
+    ],
+  },
+  vite: () => ({
+    plugins: [tailwindcss()],         // Tailwind CSS v4
+  }),
+});
+```
+
+### TypeScript Config
+
+From `tsconfig.json`:
+
+```json
+{
+  "extends": "./.wxt/tsconfig.json"  // WXT-generated types
+}
+```
+
+WXT generates `.wxt/tsconfig.json` with:
+- Extension API types (`browser.*`)
+- Path aliases (`@/` → `src/`)
+- Vue and Vite types
+
+### Vitest Config
+
+From `vitest.config.ts`:
+
+```typescript
+import { defineConfig } from "vitest/config";
+import { WxtVitest } from "wxt/testing/vitest-plugin";
+
+export default defineConfig({
+  plugins: [WxtVitest()],             // WXT test utilities
+  test: {
+    environment: "node",              // Node test environment
+    globals: true,                    // Auto-import test APIs
+    include: ["tests/**/*.{test,spec}.{ts,js}"],
+    clearMocks: true,                 // Reset mocks between tests
+    restoreMocks: true,
+  },
+});
+```
+
+## IDE Setup (VS Code)
+
+### Recommended Extensions
+
+```json
+// .vscode/extensions.json
+{
+  "recommendations": [
+    "Vue.volar",                    // Vue 3 language support
+    "dbaeumer.vscode-eslint",       // ESLint integration (optional)
+    "bradlc.vscode-tailwindcss",    // Tailwind IntelliSense
+    "vitest.explorer",              // Vitest test runner
+  ]
+}
+```
+
+### Workspace Settings
+
+```json
+// .vscode/settings.json
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "oxfmt",  // Use oxfmt for formatting
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "vue.server.hybridMode": true,       // Enable Volar hybrid mode
+}
+```
+
+## Debugging
+
+### Background Service Worker
+
+<Steps>
+  <Step title="Open Extension Details">
+    Navigate to `chrome://extensions` and find LuminTime.
+  </Step>
+  
+  <Step title="Click 'Service Worker' Link">
+    Opens DevTools for the background script.
+  </Step>
+  
+  <Step title="Add Breakpoints">
+    - View console logs from `background.ts`
+    - Set breakpoints in Sources tab
+    - Inspect IndexedDB in Application tab
+  </Step>
+</Steps>
+
+**Tip:** Add `console.log()` statements liberally—they appear in the service worker console.
+
+### Popup UI
+
+<Steps>
+  <Step title="Open Extension Popup">
+    Click the LuminTime icon in browser toolbar.
+  </Step>
+  
+  <Step title="Right-Click → Inspect">
+    Opens DevTools for the popup window.
+  </Step>
+  
+  <Step title="Debug Vue Components">
+    - Install Vue DevTools browser extension
+    - View component hierarchy and reactive state
+    - Inspect props, computed values, and emitted events
+  </Step>
+</Steps>
+
+### Database Inspection
+
+View IndexedDB directly:
+
+<Steps>
+  <Step title="Open DevTools on Any Page">
+    Right-click page → Inspect
+  </Step>
+  
+  <Step title="Navigate to Application Tab">
+    Chrome: Application → Storage → IndexedDB
+    
+    Firefox: Storage → IndexedDB
+  </Step>
+  
+  <Step title="Expand LuminTimeDB">
+    View tables: `history`, `sites`, `pages`, `hourlyStats`, `meta`
+  </Step>
+  
+  <Step title="Run Queries in Console">
+    ```javascript
+    // Open a connection
+    const req = indexedDB.open('LuminTimeDB');
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('sites', 'readonly');
+      const store = tx.objectStore('sites');
+      const getAll = store.getAll();
+      getAll.onsuccess = () => console.log(getAll.result);
+    };
+    ```
+  </Step>
+</Steps>
+
+## Common Issues
+
+<AccordionGroup>
+  <Accordion title="Extension won't load after changes">
+    **Solution:**
+    1. Check WXT dev server is running (`bun run dev`)
+    2. Look for build errors in terminal
+    3. Click "Reload" in `chrome://extensions`
+    4. If still broken, remove and re-add the extension
+  </Accordion>
+  
+  <Accordion title="TypeScript errors in editor">
+    **Solution:**
+    1. Run `bun install` to ensure WXT types are generated
+    2. Restart TypeScript server (VS Code: Cmd+Shift+P → "Restart TS Server")
+    3. Check `.wxt/tsconfig.json` exists
+  </Accordion>
+  
+  <Accordion title="Hot reload not working">
+    **Solution:**
+    - Hot reload only works for popup/UI changes
+    - Background script changes require manual reload
+    - Manifest changes require removing and re-adding extension
+  </Accordion>
+  
+  <Accordion title="IndexedDB data persists between reloads">
+    **Solution:**
+    This is expected! IndexedDB survives extension reloads. To clear:
+    
+    ```javascript
+    // Run in background service worker console
+    await browser.storage.local.clear();
+    indexedDB.deleteDatabase('LuminTimeDB');
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Development Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Console Logs Liberally" icon="terminal">
+    Background workers can't use breakpoints reliably. Use `console.log()` for debugging.
+  </Card>
+  
+  <Card title="Test in Multiple Browsers" icon="browser">
+    Chrome and Firefox have subtle differences. Test both regularly.
+  </Card>
+  
+  <Card title="Run Type Checks Often" icon="code">
+    `bun run compile` catches issues early before runtime errors.
+  </Card>
+  
+  <Card title="Keep Extension Reloaded" icon="rotate">
+    After background script changes, always reload in `chrome://extensions`.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/developer/architecture">
+    Understand how the extension is structured
+  </Card>
+  <Card title="Testing" icon="flask" href="/developer/testing">
+    Write and run tests with Vitest
+  </Card>
+  <Card title="Building" icon="hammer" href="/developer/building">
+    Build production-ready extension packages
+  </Card>
+</CardGroup>

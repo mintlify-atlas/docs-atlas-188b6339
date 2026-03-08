@@ -1,0 +1,409 @@
+---
+title: Database Types
+description: TypeScript types and schemas for the LuminTime database layer
+---
+
+The database types module defines all TypeScript types and runtime validation schemas using Arktype for the LuminTime database layer.
+
+## Event Source Types
+
+### EventSource
+
+Represents the source of an activity tracking event.
+
+```typescript
+type EventSource = 
+  | "tab_activated" 
+  | "navigation" 
+  | "window_focus" 
+  | "idle_resume" 
+  | "alarm";
+```
+
+<ResponseField name="tab_activated">
+  Activity triggered by switching to a tab
+</ResponseField>
+
+<ResponseField name="navigation">
+  Activity triggered by navigating to a new page
+</ResponseField>
+
+<ResponseField name="window_focus">
+  Activity triggered by browser window gaining focus
+</ResponseField>
+
+<ResponseField name="idle_resume">
+  Activity triggered by user returning from idle state
+</ResponseField>
+
+<ResponseField name="alarm">
+  Activity triggered by periodic alarm check
+</ResponseField>
+
+---
+
+## Primary Data Types
+
+### IHistoryLog
+
+Raw browsing history log entry (Layer 1). Used for detailed history review and audit trails.
+
+```typescript
+interface IHistoryLog {
+  id?: number;
+  date: string;
+  hostname: string;
+  path: string;
+  startTime: number;
+  duration: number;
+  title?: string;
+  eventSource?: EventSource;
+}
+```
+
+<ResponseField name="id" type="number" optional>
+  Auto-incremented primary key assigned by Dexie
+</ResponseField>
+
+<ResponseField name="date" type="string" required>
+  Date in YYYY-MM-DD format
+</ResponseField>
+
+<ResponseField name="hostname" type="string" required>
+  Site hostname (e.g., "developer.chrome.com")
+</ResponseField>
+
+<ResponseField name="path" type="string" required>
+  URL path including query parameters (e.g., "/search?q=...")
+</ResponseField>
+
+<ResponseField name="startTime" type="number" required>
+  Activity start timestamp in milliseconds since epoch
+</ResponseField>
+
+<ResponseField name="duration" type="number" required>
+  Activity duration in milliseconds
+</ResponseField>
+
+<ResponseField name="title" type="string" optional>
+  Page title
+</ResponseField>
+
+<ResponseField name="eventSource" type="EventSource" optional>
+  Source that triggered this activity record
+</ResponseField>
+
+**Example:**
+
+```typescript
+import type { IHistoryLog } from '@/db/types';
+
+const log: IHistoryLog = {
+  id: 12345,
+  date: '2026-03-07',
+  hostname: 'github.com',
+  path: '/trending',
+  startTime: 1709856000000,
+  duration: 120000, // 2 minutes
+  title: 'Trending repositories',
+  eventSource: 'tab_activated'
+};
+```
+
+---
+
+### ISiteStat
+
+Aggregated site statistics (Layer 2). Used for dashboard overviews and top sites display.
+
+```typescript
+interface ISiteStat {
+  hostname: string;
+  date: string;
+  duration: number;
+  lastVisit: number;
+  iconUrl?: string;
+}
+```
+
+<ResponseField name="hostname" type="string" required>
+  Site hostname (part of composite primary key `[date, hostname]`)
+</ResponseField>
+
+<ResponseField name="date" type="string" required>
+  Date in YYYY-MM-DD format (part of composite primary key)
+</ResponseField>
+
+<ResponseField name="duration" type="number" required>
+  Total accumulated duration in milliseconds for this site on this date
+</ResponseField>
+
+<ResponseField name="lastVisit" type="number" required>
+  Timestamp of the most recent visit to this site
+</ResponseField>
+
+<ResponseField name="iconUrl" type="string" optional>
+  URL to the site's favicon
+</ResponseField>
+
+**Example:**
+
+```typescript
+import type { ISiteStat } from '@/db/types';
+
+const siteStat: ISiteStat = {
+  hostname: 'github.com',
+  date: '2026-03-07',
+  duration: 3600000, // 1 hour total
+  lastVisit: 1709859600000,
+  iconUrl: 'https://github.com/favicon.ico'
+};
+```
+
+---
+
+### IPageStat
+
+Detailed page-level statistics (Layer 3). Used for drill-down analysis of specific site pages.
+
+```typescript
+interface IPageStat {
+  path: string;
+  hostname: string;
+  date: string;
+  fullPath: string;
+  duration: number;
+  title?: string;
+}
+```
+
+<ResponseField name="path" type="string" required>
+  URL path (part of composite primary key `[date, hostname, path]`)
+</ResponseField>
+
+<ResponseField name="hostname" type="string" required>
+  Site hostname (part of composite primary key)
+</ResponseField>
+
+<ResponseField name="date" type="string" required>
+  Date in YYYY-MM-DD format (part of composite primary key)
+</ResponseField>
+
+<ResponseField name="fullPath" type="string" required>
+  Complete URL path for display purposes
+</ResponseField>
+
+<ResponseField name="duration" type="number" required>
+  Total accumulated duration in milliseconds for this page on this date
+</ResponseField>
+
+<ResponseField name="title" type="string" optional>
+  Page title
+</ResponseField>
+
+**Example:**
+
+```typescript
+import type { IPageStat } from '@/db/types';
+
+const pageStat: IPageStat = {
+  path: '/trending',
+  hostname: 'github.com',
+  date: '2026-03-07',
+  fullPath: '/trending',
+  duration: 1800000, // 30 minutes
+  title: 'Trending repositories'
+};
+```
+
+---
+
+### IHourlyStat
+
+Hourly aggregated statistics (Layer 1.5). Generated by retention jobs for trend visualization.
+
+```typescript
+interface IHourlyStat {
+  date: string;
+  hour: number;
+  duration: number;
+}
+```
+
+<ResponseField name="date" type="string" required>
+  Date in YYYY-MM-DD format (part of composite primary key `[date, hour]`)
+</ResponseField>
+
+<ResponseField name="hour" type="number" required>
+  Hour of day (0-23, part of composite primary key)
+</ResponseField>
+
+<ResponseField name="duration" type="number" required>
+  Total duration in milliseconds for this hour
+</ResponseField>
+
+**Example:**
+
+```typescript
+import type { IHourlyStat } from '@/db/types';
+
+const hourlyStat: IHourlyStat = {
+  date: '2026-03-07',
+  hour: 14, // 2 PM
+  duration: 900000 // 15 minutes
+};
+```
+
+---
+
+## Composite Key Types
+
+### SiteKey
+
+Composite primary key for the sites table.
+
+```typescript
+type SiteKey = [date: string, hostname: string];
+```
+
+**Example:**
+
+```typescript
+import type { SiteKey } from '@/db/types';
+import { db } from '@/db';
+
+const key: SiteKey = ['2026-03-07', 'github.com'];
+const siteStat = await db.sites.get(key);
+```
+
+---
+
+### PageKey
+
+Composite primary key for the pages table.
+
+```typescript
+type PageKey = [date: string, hostname: string, path: string];
+```
+
+**Example:**
+
+```typescript
+import type { PageKey } from '@/db/types';
+import { db } from '@/db';
+
+const key: PageKey = ['2026-03-07', 'github.com', '/trending'];
+const pageStat = await db.pages.get(key);
+```
+
+---
+
+### HourKey
+
+Composite primary key for the hourly stats table.
+
+```typescript
+type HourKey = [date: string, hour: number];
+```
+
+**Example:**
+
+```typescript
+import type { HourKey } from '@/db/types';
+import { db } from '@/db';
+
+const key: HourKey = ['2026-03-07', 14];
+const hourlyStat = await db.hourlyStats.get(key);
+```
+
+---
+
+## Runtime Validation Schemas
+
+All types have corresponding Arktype runtime validation schemas for data integrity:
+
+### HistoryLog Schema
+
+```typescript
+import { HistoryLog } from '@/db/types';
+
+// Validate runtime data
+const result = HistoryLog({
+  date: '2026-03-07',
+  hostname: 'github.com',
+  path: '/trending',
+  startTime: Date.now(),
+  duration: 120000
+});
+
+if (result.problems) {
+  console.error('Validation failed:', result.problems);
+} else {
+  console.log('Valid history log:', result.data);
+}
+```
+
+### SiteStat Schema
+
+```typescript
+import { SiteStat } from '@/db/types';
+
+const result = SiteStat({
+  hostname: 'github.com',
+  date: '2026-03-07',
+  duration: 3600000,
+  lastVisit: Date.now()
+});
+```
+
+### PageStat Schema
+
+```typescript
+import { PageStat } from '@/db/types';
+
+const result = PageStat({
+  path: '/trending',
+  hostname: 'github.com',
+  date: '2026-03-07',
+  fullPath: '/trending',
+  duration: 1800000
+});
+```
+
+### HourlyStat Schema
+
+```typescript
+import { HourlyStat } from '@/db/types';
+
+const result = HourlyStat({
+  date: '2026-03-07',
+  hour: 14,
+  duration: 900000
+});
+```
+
+---
+
+## Data Layer Architecture
+
+LuminTime uses a three-layer database architecture:
+
+<Card title="Layer 1: Raw History" icon="database">
+  **IHistoryLog** - Individual activity records for detailed audit and history review
+</Card>
+
+<Card title="Layer 1.5: Hourly Aggregation" icon="chart-line">
+  **IHourlyStat** - Hourly aggregates generated from old raw data to save space while preserving trends
+</Card>
+
+<Card title="Layer 2: Site Overview" icon="globe">
+  **ISiteStat** - Daily aggregated statistics per site for dashboard display
+</Card>
+
+<Card title="Layer 3: Page Details" icon="file">
+  **IPageStat** - Daily aggregated statistics per page for drill-down analysis
+</Card>
+
+<Info>
+This layered approach balances detailed tracking with efficient storage. Raw history is retained based on retention settings, then aggregated to hourly stats to preserve trends while reducing storage.
+</Info>

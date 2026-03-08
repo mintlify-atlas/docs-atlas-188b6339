@@ -1,0 +1,219 @@
+---
+title: Installation
+description: Install LuminTime from the Chrome Web Store or set up a local development environment
+---
+
+# Installation
+
+LuminTime can be installed in two ways: directly from the Chrome Web Store for regular use, or built from source for development and customization.
+
+## Install from Chrome Web Store
+
+The easiest way to get started with LuminTime is through the Chrome Web Store:
+
+<Steps>
+  <Step title="Visit the Chrome Web Store">
+    Navigate to the [LuminTime extension page](https://chromewebstore.google.com/detail/lumin-time/elfkjlledpjmjehekdklejboanfbffak) in the Chrome Web Store.
+  </Step>
+  
+  <Step title="Add to Browser">
+    Click the **"Add to Chrome"** button at the top of the page.
+  </Step>
+  
+  <Step title="Confirm Installation">
+    When prompted, click **"Add extension"** to confirm the installation.
+    
+    LuminTime requires the following permissions:
+    - **tabs** – Monitor active tab changes
+    - **storage** – Store data locally in IndexedDB
+    - **webNavigation** – Track page navigation events
+    - **idle** – Detect when you're away from the computer
+    - **alarms** – Schedule periodic background tasks
+  </Step>
+  
+  <Step title="Start Tracking">
+    Once installed, LuminTime begins tracking automatically. Click the extension icon in your browser toolbar to view your analytics.
+  </Step>
+</Steps>
+
+<Note>
+  LuminTime works with all Chromium-based browsers including Chrome, Edge, Brave, and Opera.
+</Note>
+
+## Local Development Setup
+
+For developers who want to customize LuminTime or contribute to the project, you can build and run the extension locally.
+
+### Prerequisites
+
+Before you begin, ensure you have:
+
+- **Node.js 18+** installed on your system
+- **Bun package manager** for fast dependency installation
+- A **Chromium-based browser** (Chrome, Edge, Brave, etc.)
+
+### Setup Instructions
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the LuminTime repository from GitHub:
+    
+    ```bash
+    git clone https://github.com/nuttycc/LuminTime.git
+    cd LuminTime
+    ```
+  </Step>
+  
+  <Step title="Install Dependencies">
+    Use Bun to install all required dependencies:
+    
+    ```bash
+    bun install
+    ```
+    
+    This installs:
+    - WXT framework for extension development
+    - Vue 3 and related UI libraries
+    - Dexie.js for IndexedDB operations
+    - Development tools (TypeScript, Vitest, etc.)
+  </Step>
+  
+  <Step title="Start Development Server">
+    Run the WXT development server with hot module replacement:
+    
+    ```bash
+    bun run dev
+    ```
+    
+    This command builds the extension and watches for file changes. The output will be in the `.output/chrome-mv3` directory.
+  </Step>
+  
+  <Step title="Load Extension in Browser">
+    Load the unpacked extension into your browser:
+    
+    1. Open your browser and navigate to `chrome://extensions/`
+    2. Enable **"Developer mode"** using the toggle in the top-right corner
+    3. Click **"Load unpacked"** button
+    4. Select the `.output/chrome-mv3` folder from the LuminTime directory
+    
+    <Info>
+      With WXT's hot module replacement, changes to your code will automatically reload the extension without manual refreshing.
+    </Info>
+  </Step>
+</Steps>
+
+### Project Structure
+
+Once you have the project set up, here's how the code is organized:
+
+```
+src/
+├── entrypoints/     # Extension entry points (background, popup)
+│   ├── background/  # Background script for session tracking
+│   └── popup/       # Vue 3 popup interface
+├── components/      # Reusable Vue 3 components
+├── composables/     # Vue composables (React hooks equivalent)
+├── db/             # Database layer (Dexie models, services)
+│   ├── models/     # IndexedDB table schemas
+│   └── services/   # Data access and business logic
+├── utils/          # Utility functions
+└── styles/         # Global styles (Tailwind CSS)
+```
+
+### Available Commands
+
+When developing LuminTime locally, you have access to several useful commands:
+
+<CodeGroup>
+```bash Development
+# Start development server with HMR
+bun run dev
+```
+
+```bash Build
+# Build production-ready extension
+bun run build
+
+# Create distributable zip file
+bun run zip
+
+# Build for Firefox
+bun run zip:firefox
+```
+
+```bash Code Quality
+# Type check with TypeScript
+bun run compile
+
+# Lint code with Oxlint
+bun run lint
+
+# Format code with Oxfmt
+bun run format
+
+# Run unit tests
+bun run test
+```
+</CodeGroup>
+
+### Building for Production
+
+To create a production build:
+
+```bash
+bun run build
+bun run zip
+```
+
+This creates an optimized extension package in `.output/lumin-time-[version].zip` ready for distribution.
+
+## Browser Compatibility
+
+LuminTime is compatible with:
+
+- ✅ Google Chrome (v88+)
+- ✅ Microsoft Edge (v88+)
+- ✅ Brave Browser
+- ✅ Opera
+- ⚠️ Firefox (requires separate build with `bun run zip:firefox`)
+
+<Note>
+  LuminTime uses Manifest V3, which is the current standard for Chrome extensions.
+</Note>
+
+## Troubleshooting
+
+### Extension Not Loading
+
+If the extension fails to load:
+
+1. Ensure Developer mode is enabled in `chrome://extensions/`
+2. Check that you selected the `.output/chrome-mv3` folder (not the root project folder)
+3. Look for error messages in the Extensions page
+
+### Development Server Issues
+
+If `bun run dev` fails:
+
+1. Verify Node.js 18+ is installed: `node --version`
+2. Delete `node_modules` and `.output` folders, then run `bun install` again
+3. Check for port conflicts (WXT uses default dev server ports)
+
+### Data Not Persisting
+
+If tracking data disappears:
+
+1. Check browser console for IndexedDB errors
+2. Ensure the extension has storage permissions
+3. Verify you're not in Incognito mode (IndexedDB is isolated)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Learn how to use LuminTime and explore your analytics
+  </Card>
+  <Card title="View on GitHub" icon="github" href="https://github.com/nuttycc/LuminTime">
+    Explore the source code and contribute
+  </Card>
+</CardGroup>

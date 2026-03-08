@@ -1,0 +1,392 @@
+---
+title: Data Retention
+description: Functions for managing data retention policies and aggregating old data
+---
+
+The retention module manages data lifecycle by aggregating old raw history into hourly statistics and enforcing retention policies to balance detail with storage efficiency.
+
+## Retention Settings
+
+### getRawRetentionDays
+
+Get the current raw history retention period in days.
+
+**Returns:** `Promise<number>`
+
+Number of days to retain raw history logs. Default is 7 days, minimum is 1 day.
+
+```typescript
+import { getRawRetentionDays } from '@/db/retention';
+
+const days = await getRawRetentionDays();
+console.log(`Raw history retained for ${days} days`);
+```
+
+---
+
+### setRawRetentionDays
+
+Set the raw history retention period.
+
+<ParamField path="days" type="number" required>
+  Number of days to retain raw history (minimum 1 day)
+</ParamField>
+
+```typescript
+import { setRawRetentionDays } from '@/db/retention';
+
+// Set retention to 14 days
+await setRawRetentionDays(14);
+
+// Minimum is enforced
+await setRawRetentionDays(0.5); // Clamped to 1
+await setRawRetentionDays(-5);  // Clamped to 1
+
+// Value is rounded
+await setRawRetentionDays(7.8); // Rounded to 8
+```
+
+<Info>
+The retention period determines how many days of detailed raw history are kept. Older data is aggregated into hourly statistics to save space while preserving trends.
+</Info>
+
+---
+
+## Aggregation Functions
+
+### aggregateOneDay
+
+Aggregate raw history for a specific day into hourly statistics, then delete the raw records.
+
+<ParamField path="date" type="string" required>
+  Date to aggregate in YYYY-MM-DD format
+</ParamField>
+
+```typescript
+import { aggregateOneDay } from '@/db/retention';
+
+// Aggregate history for a specific day
+await aggregateOneDay('2026-03-01');
+```
+
+**What it does:**
+
+1. Reads all history records for the specified date
+2. Aggregates duration by hour (0-23)
+3. Writes hourly statistics to the `hourlyStats` table
+4. Deletes the original raw history records for that date
+
+**Example transformation:**
+
+```typescript
+// Before: Raw history records
+[
+  { date: '2026-03-01', startTime: 1709280000000, duration: 300000 },  // 10:00 AM
+  { date: '2026-03-01', startTime: 1709283600000, duration: 600000 },  // 11:00 AM
+  { date: '2026-03-01', startTime: 1709287200000, duration: 450000 },  // 12:00 PM
+]
+
+// After: Hourly aggregates
+[
+  { date: '2026-03-01', hour: 10, duration: 300000 },
+  { date: '2026-03-01', hour: 11, duration: 600000 },
+  { date: '2026-03-01', hour: 12, duration: 450000 },
+]
+```
+
+<Warning>
+This operation is irreversible. Once raw history is aggregated, detailed page-level information for that day is lost. Only hourly duration totals are preserved.
+</Warning>
+
+---
+
+### runRetentionJob
+
+Run the retention job to aggregate old raw history beyond the retention period.
+
+<ParamField path="maxDays" type="number" default="3">
+  Maximum number of days to process in a single run
+</ParamField>
+
+```typescript
+import { runRetentionJob } from '@/db/retention';
+
+// Process up to 3 days of old history
+await runRetentionJob();
+
+// Process more aggressively (up to 10 days)
+await runRetentionJob(10);
+```
+
+**How it works:**
+
+1. Gets the current retention period (e.g., 7 days)
+2. Calculates the cutoff date (today - retention days)
+3. Finds the oldest raw history records
+4. If they're older than the cutoff, aggregates them one day at a time
+5. Stops after processing `maxDays` or when all old data is processed
+
+**Example:**
+
+```typescript
+// Today: 2026-03-08
+// Retention: 7 days
+// Cutoff: 2026-03-01
+
+// Raw history exists for: 2026-02-25, 2026-02-26, 2026-02-27
+
+await runRetentionJob(2);
+// Aggregates: 2026-02-25, 2026-02-26
+// Remaining raw history: 2026-02-27, 2026-03-01 onwards
+
+await runRetentionJob(2);
+// Aggregates: 2026-02-27
+// All raw history is now within retention period
+```
+
+<Tip>
+Run this job periodically (e.g., daily via alarm) to gradually clean up old data without blocking the UI.
+</Tip>
+
+---
+
+## Usage Examples
+
+### Background Retention Job
+
+```typescript
+import { runRetentionJob } from '@/db/retention';
+
+// In background.ts
+browser.alarms.create('retention-job', {
+  periodInMinutes: 60 * 24, // Run daily
+});
+
+browser.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'retention-job') {
+    console.log('Running retention job...');
+    await runRetentionJob(3);
+    console.log('Retention job complete');
+  }
+});
+```
+
+### Settings UI Component
+
+```vue
+<script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import { getRawRetentionDays, setRawRetentionDays } from '@/db/retention';
+
+const retentionDays = ref(7);
+const saving = ref(false);
+
+onMounted(async () => {
+  retentionDays.value = await getRawRetentionDays();
+});
+
+async function saveRetention() {
+  saving.value = true;
+  try {
+    await setRawRetentionDays(retentionDays.value);
+    alert('Settings saved!');
+  } catch (error) {
+    alert('Failed to save: ' + error.message);
+  } finally {
+    saving.value = false;
+  }
+}
+</script>
+
+<template>
+  <div class="space-y-4">
+    <div>
+      <label for="retention" class="label">
+        Raw History Retention (days)
+      </label>
+      <input 
+        id="retention"
+        v-model.number="retentionDays"
+        type="number"
+        min="1"
+        class="input input-bordered w-full"
+      />
+      <p class="text-sm text-gray-500 mt-2">
+        Detailed history older than {{ retentionDays }} days will be aggregated to hourly stats.
+      </p>
+    </div>
+    
+    <button 
+      @click="saveRetention"
+      :disabled="saving"
+      class="btn btn-primary"
+    >
+      {{ saving ? 'Saving...' : 'Save Settings' }}
+    </button>
+  </div>
+</template>
+```
+
+### Manual Cleanup Tool
+
+```typescript
+import { aggregateOneDay, getRawRetentionDays } from '@/db/retention';
+import { getTodayStr } from '@/db/utils';
+import { formatDate, parseDate, addDays } from '@/utils/dateUtils';
+import { db } from '@/db';
+
+// Get list of dates that can be aggregated
+async function getAggregableDates(): Promise<string[]> {
+  const retentionDays = await getRawRetentionDays();
+  const cutoff = formatDate(addDays(parseDate(getTodayStr()), -(retentionDays - 1)));
+  
+  const oldRecords = await db.history
+    .where('date')
+    .below(cutoff)
+    .toArray();
+  
+  const uniqueDates = [...new Set(oldRecords.map(r => r.date))];
+  return uniqueDates.sort();
+}
+
+// Manually aggregate specific dates
+async function manualCleanup(dates: string[]) {
+  for (const date of dates) {
+    console.log(`Aggregating ${date}...`);
+    await aggregateOneDay(date);
+  }
+  console.log(`Aggregated ${dates.length} days`);
+}
+
+// Usage
+const dates = await getAggregableDates();
+console.log('Dates ready for aggregation:', dates);
+await manualCleanup(dates);
+```
+
+### Storage Statistics
+
+```typescript
+import { db } from '@/db';
+import { getRawRetentionDays } from '@/db/retention';
+
+async function getStorageStats() {
+  const [historyCount, hoursCount, sitesCount, pagesCount, retentionDays] = await Promise.all([
+    db.history.count(),
+    db.hourlyStats.count(),
+    db.sites.count(),
+    db.pages.count(),
+    getRawRetentionDays(),
+  ]);
+  
+  return {
+    rawHistory: historyCount,
+    hourlyAggregates: hoursCount,
+    sites: sitesCount,
+    pages: pagesCount,
+    retentionDays,
+  };
+}
+
+// Display stats
+const stats = await getStorageStats();
+console.log(`
+Storage Statistics:
+  Raw History: ${stats.rawHistory} records
+  Hourly Aggregates: ${stats.hourlyAggregates} records
+  Sites: ${stats.sites} records
+  Pages: ${stats.pages} records
+  Retention: ${stats.retentionDays} days
+`);
+```
+
+---
+
+## Retention Strategy
+
+LuminTime uses a tiered data retention strategy:
+
+<Steps>
+  <Step title="Recent History (0-7 days)">
+    Full detailed raw history is kept, including:
+    - Individual page visits with exact timestamps
+    - Event sources (tab activation, navigation, etc.)
+    - Page titles and full paths
+  </Step>
+  
+  <Step title="Older History (7+ days)">
+    Aggregated to hourly statistics:
+    - Total duration per hour of day
+    - Site and page aggregates still available
+    - Raw event details are discarded
+  </Step>
+  
+  <Step title="Permanent Aggregates">
+    Site and page statistics are kept indefinitely:
+    - Daily totals per site
+    - Daily totals per page
+    - Never automatically deleted
+  </Step>
+</Steps>
+
+<Info>
+**Storage Efficiency:** Aggregating 1000 raw history records into 24 hourly records reduces storage by ~97% while preserving daily activity patterns.
+</Info>
+
+---
+
+## Configuration Constants
+
+```typescript
+// From retention.ts
+const DEFAULT_RAW_RETENTION_DAYS = 7;
+const MIN_RAW_RETENTION_DAYS = 1;
+const META_KEY_RAW_RETENTION = "retention.rawDays";
+```
+
+<ResponseField name="DEFAULT_RAW_RETENTION_DAYS" type="7">
+  Default retention period when not explicitly set
+</ResponseField>
+
+<ResponseField name="MIN_RAW_RETENTION_DAYS" type="1">
+  Minimum allowed retention period
+</ResponseField>
+
+<ResponseField name="META_KEY_RAW_RETENTION" type="'retention.rawDays'">
+  Storage key in meta table for retention setting
+</ResponseField>
+
+---
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="When to run retention jobs">
+    Run retention jobs during periods of low activity:
+    - Daily at a fixed time (e.g., 3 AM)
+    - On browser startup (with throttling)
+    - When the extension is idle
+    
+    Avoid running during active browsing to prevent performance impact.
+  </Accordion>
+  
+  <Accordion title="Choosing retention period">
+    Consider user needs and storage constraints:
+    - **1-3 days:** Minimal storage, only recent detail
+    - **7 days (default):** Good balance for most users
+    - **14-30 days:** For users who want detailed history
+    - **90+ days:** For power users with ample storage
+  </Accordion>
+  
+  <Accordion title="Handling aggregation errors">
+    Wrap retention jobs in try-catch to handle edge cases:
+    ```typescript
+    try {
+      await runRetentionJob();
+    } catch (error) {
+      console.error('Retention job failed:', error);
+      // Don't crash the background script
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,477 @@
+---
+title: 'Date Utilities'
+description: 'Pure date formatting, parsing, and manipulation functions for time tracking'
+icon: 'calendar'
+---
+
+## Overview
+
+The `dateUtils` module provides a collection of pure functions for working with dates in LuminTime. All functions are:
+
+- **Pure** - No side effects, same input always produces same output
+- **Timezone-agnostic** - Works with local time
+- **Type-safe** - Full TypeScript support
+- **Zero dependencies** - Uses native JavaScript Date API
+
+These utilities are primarily used for:
+- Formatting dates for storage keys
+- Parsing stored date strings
+- Calculating time ranges (week, month)
+- Date arithmetic
+
+---
+
+## Functions
+
+### formatDate()
+
+Converts a Date object to a standardized string format (`YYYY-MM-DD`).
+
+```typescript
+formatDate(date: Date): string
+```
+
+<ParamField path="date" type="Date" required>
+  The Date object to format
+</ParamField>
+
+<ResponseField name="return" type="string">
+  Formatted date string in `YYYY-MM-DD` format
+</ResponseField>
+
+#### Example
+
+```typescript
+import { formatDate } from '@/utils/dateUtils';
+
+const date = new Date(2026, 2, 8); // March 8, 2026
+const formatted = formatDate(date);
+// => "2026-03-08"
+
+// Use for database keys
+const storageKey = `activity:${formatted}`;
+// => "activity:2026-03-08"
+```
+
+---
+
+### parseDate()
+
+Parses a date string in `YYYY-MM-DD` format back into a Date object.
+
+```typescript
+parseDate(dateStr: string): Date
+```
+
+<ParamField path="dateStr" type="string" required>
+  Date string in `YYYY-MM-DD` format
+</ParamField>
+
+<ResponseField name="return" type="Date">
+  Date object representing the parsed date at midnight local time
+</ResponseField>
+
+#### Example
+
+```typescript
+import { parseDate } from '@/utils/dateUtils';
+
+const date = parseDate("2026-03-08");
+// => Date object for March 8, 2026, 00:00:00 local time
+
+console.log(date.getFullYear()); // 2026
+console.log(date.getMonth()); // 2 (0-indexed)
+console.log(date.getDate()); // 8
+```
+
+<Warning>
+  The returned Date is set to **midnight** (00:00:00) in the local timezone, not UTC.
+</Warning>
+
+---
+
+### getStartOfWeek()
+
+Returns the Monday of the week containing the given date.
+
+```typescript
+getStartOfWeek(date: Date): Date
+```
+
+<ParamField path="date" type="Date" required>
+  The date to find the week start for
+</ParamField>
+
+<ResponseField name="return" type="Date">
+  Date object for Monday of that week
+</ResponseField>
+
+#### Behavior
+
+- **Week starts on Monday** (ISO 8601 standard)
+- If the date is already Monday, returns the same day
+- If the date is Sunday, returns the previous Monday
+
+#### Example
+
+```typescript
+import { getStartOfWeek, formatDate } from '@/utils/dateUtils';
+
+// Saturday, March 8, 2026
+const date = new Date(2026, 2, 8);
+const weekStart = getStartOfWeek(date);
+
+console.log(formatDate(weekStart));
+// => "2026-03-02" (Monday)
+
+// Query activities for the current week
+const startKey = formatDate(weekStart);
+const activities = await db.activities
+  .where('date')
+  .between(startKey, formatDate(new Date()), true, true)
+  .toArray();
+```
+
+---
+
+### getEndOfWeek()
+
+Returns the Sunday of the week containing the given date.
+
+```typescript
+getEndOfWeek(date: Date): Date
+```
+
+<ParamField path="date" type="Date" required>
+  The date to find the week end for
+</ParamField>
+
+<ResponseField name="return" type="Date">
+  Date object for Sunday of that week
+</ResponseField>
+
+#### Example
+
+```typescript
+import { getStartOfWeek, getEndOfWeek, formatDate } from '@/utils/dateUtils';
+
+const date = new Date(2026, 2, 8); // Saturday, March 8
+const weekStart = getStartOfWeek(date);
+const weekEnd = getEndOfWeek(date);
+
+console.log(formatDate(weekStart)); // "2026-03-02" (Monday)
+console.log(formatDate(weekEnd));   // "2026-03-08" (Sunday)
+
+// Get full week range
+const weekActivities = await db.activities
+  .where('date')
+  .between(formatDate(weekStart), formatDate(weekEnd), true, true)
+  .toArray();
+```
+
+---
+
+### getStartOfMonth()
+
+Returns the first day of the month containing the given date.
+
+```typescript
+getStartOfMonth(date: Date): Date
+```
+
+<ParamField path="date" type="Date" required>
+  The date to find the month start for
+</ParamField>
+
+<ResponseField name="return" type="Date">
+  Date object for the 1st day of that month
+</ResponseField>
+
+#### Example
+
+```typescript
+import { getStartOfMonth, formatDate } from '@/utils/dateUtils';
+
+const date = new Date(2026, 2, 8); // March 8, 2026
+const monthStart = getStartOfMonth(date);
+
+console.log(formatDate(monthStart));
+// => "2026-03-01"
+
+// Query all activities in March
+const monthKey = formatDate(monthStart);
+const activities = await db.activities
+  .where('date')
+  .startsWith(monthKey.substring(0, 7)) // "2026-03"
+  .toArray();
+```
+
+---
+
+### getEndOfMonth()
+
+Returns the last day of the month containing the given date.
+
+```typescript
+getEndOfMonth(date: Date): Date
+```
+
+<ParamField path="date" type="Date" required>
+  The date to find the month end for
+</ParamField>
+
+<ResponseField name="return" type="Date">
+  Date object for the last day of that month (28-31)
+</ResponseField>
+
+#### Example
+
+```typescript
+import { getStartOfMonth, getEndOfMonth, formatDate } from '@/utils/dateUtils';
+
+const date = new Date(2026, 2, 8); // March 8, 2026
+const monthStart = getStartOfMonth(date);
+const monthEnd = getEndOfMonth(date);
+
+console.log(formatDate(monthStart)); // "2026-03-01"
+console.log(formatDate(monthEnd));   // "2026-03-31"
+
+// Get full month range
+const monthActivities = await db.activities
+  .where('date')
+  .between(formatDate(monthStart), formatDate(monthEnd), true, true)
+  .toArray();
+```
+
+---
+
+### addDays()
+
+Adds (or subtracts) a specified number of days to a date.
+
+```typescript
+addDays(date: Date, days: number): Date
+```
+
+<ParamField path="date" type="Date" required>
+  The starting date
+</ParamField>
+
+<ParamField path="days" type="number" required>
+  Number of days to add (positive) or subtract (negative)
+</ParamField>
+
+<ResponseField name="return" type="Date">
+  New Date object with the adjusted date
+</ResponseField>
+
+#### Example
+
+```typescript
+import { addDays, formatDate } from '@/utils/dateUtils';
+
+const today = new Date(2026, 2, 8); // March 8, 2026
+
+// Add days
+const tomorrow = addDays(today, 1);
+console.log(formatDate(tomorrow)); // "2026-03-09"
+
+const nextWeek = addDays(today, 7);
+console.log(formatDate(nextWeek)); // "2026-03-15"
+
+// Subtract days
+const yesterday = addDays(today, -1);
+console.log(formatDate(yesterday)); // "2026-03-07"
+
+const lastWeek = addDays(today, -7);
+console.log(formatDate(lastWeek)); // "2026-03-01"
+
+// Use for date range queries
+const last7Days = await db.activities
+  .where('date')
+  .between(formatDate(addDays(today, -7)), formatDate(today), true, true)
+  .toArray();
+```
+
+---
+
+### addMonths()
+
+Adds (or subtracts) a specified number of months to a date.
+
+```typescript
+addMonths(date: Date, months: number): Date
+```
+
+<ParamField path="date" type="Date" required>
+  The starting date
+</ParamField>
+
+<ParamField path="months" type="number" required>
+  Number of months to add (positive) or subtract (negative)
+</ParamField>
+
+<ResponseField name="return" type="Date">
+  New Date object with the adjusted month
+</ResponseField>
+
+#### Behavior
+
+- Handles month overflow correctly (e.g., adding 1 month to Jan 31 → Feb 28/29)
+- If the target month has fewer days than the original date, returns the last day of the target month
+
+#### Example
+
+```typescript
+import { addMonths, formatDate } from '@/utils/dateUtils';
+
+const date = new Date(2026, 2, 8); // March 8, 2026
+
+// Add months
+const nextMonth = addMonths(date, 1);
+console.log(formatDate(nextMonth)); // "2026-04-08"
+
+const nextYear = addMonths(date, 12);
+console.log(formatDate(nextYear)); // "2027-03-08"
+
+// Subtract months
+const lastMonth = addMonths(date, -1);
+console.log(formatDate(lastMonth)); // "2026-02-08"
+
+// Edge case: Month overflow
+const jan31 = new Date(2026, 0, 31); // Jan 31, 2026
+const feb = addMonths(jan31, 1);
+console.log(formatDate(feb)); // "2026-02-28" (not March 3)
+
+// Use for historical queries
+const last3Months = await db.activities
+  .where('date')
+  .between(
+    formatDate(addMonths(date, -3)),
+    formatDate(date),
+    true,
+    true
+  )
+  .toArray();
+```
+
+<Warning>
+  When adding months to a date near the end of the month, the result may be adjusted to the last valid day of the target month. For example, `addMonths(new Date(2026, 0, 31), 1)` returns Feb 28, not March 3.
+</Warning>
+
+---
+
+## Common Patterns
+
+### Database Query with Date Range
+
+```typescript
+import { formatDate, addDays, getStartOfWeek, getEndOfWeek } from '@/utils/dateUtils';
+import { db } from '@/db';
+
+// Last 7 days
+const today = new Date();
+const activities = await db.activities
+  .where('date')
+  .between(
+    formatDate(addDays(today, -7)),
+    formatDate(today),
+    true,
+    true
+  )
+  .toArray();
+
+// Current week (Mon-Sun)
+const weekStart = getStartOfWeek(today);
+const weekEnd = getEndOfWeek(today);
+const weekActivities = await db.activities
+  .where('date')
+  .between(formatDate(weekStart), formatDate(weekEnd), true, true)
+  .toArray();
+```
+
+### Generating Date Labels for Charts
+
+```typescript
+import { formatDate, addDays } from '@/utils/dateUtils';
+
+// Generate last 7 days as labels
+const today = new Date();
+const labels = Array.from({ length: 7 }, (_, i) => {
+  return formatDate(addDays(today, -6 + i));
+});
+// => ["2026-03-02", "2026-03-03", ..., "2026-03-08"]
+```
+
+### Week Navigation
+
+```typescript
+import { getStartOfWeek, addDays } from '@/utils/dateUtils';
+
+const currentWeekStart = getStartOfWeek(new Date());
+
+// Previous week
+const previousWeekStart = addDays(currentWeekStart, -7);
+
+// Next week
+const nextWeekStart = addDays(currentWeekStart, 7);
+```
+
+### Month Navigation
+
+```typescript
+import { getStartOfMonth, addMonths } from '@/utils/dateUtils';
+
+const currentMonthStart = getStartOfMonth(new Date());
+
+// Previous month
+const previousMonthStart = addMonths(currentMonthStart, -1);
+
+// Next month
+const nextMonthStart = addMonths(currentMonthStart, 1);
+```
+
+---
+
+## TypeScript Types
+
+All functions use native JavaScript `Date` objects:
+
+```typescript
+// Input and output are always Date objects
+const input: Date = new Date();
+const output: Date = addDays(input, 7);
+
+// Except formatDate which returns a string
+const dateString: string = formatDate(new Date());
+
+// And parseDate which accepts a string
+const parsed: Date = parseDate("2026-03-08");
+```
+
+---
+
+## Best Practices
+
+<Tip>
+  **Always use `formatDate()` for storage keys** to ensure consistent date formatting across the application.
+</Tip>
+
+<Tip>
+  **Use `getStartOfWeek()` / `getEndOfWeek()`** for week-based queries instead of manual date arithmetic.
+</Tip>
+
+<Warning>
+  **Be aware of month overflow** when using `addMonths()` with dates near the end of the month.
+</Warning>
+
+<Warning>
+  **All dates use local timezone** - these utilities do not handle UTC conversions.
+</Warning>
+
+---
+
+## Related
+
+- [SessionManager](/api/utils/session-manager) - Uses formatDate for timestamping sessions
+- [Database Service](/api/database/service) - Uses date utils for activity grouping

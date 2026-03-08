@@ -1,0 +1,568 @@
+---
+title: 'Data Management'
+description: 'Export, import, and manage your browsing data with full control'
+icon: 'database'
+---
+
+## Overview
+
+LuminTime gives you complete control over your data. Export your entire browsing history to JSON for backup or migration, import data from previous exports, and configure data retention policies.
+
+<CardGroup cols={3}>
+  <Card title="Export Data" icon="file-export">
+    Save all data to JSON file
+  </Card>
+  <Card title="Import Data" icon="file-import">
+    Restore from backup
+  </Card>
+  <Card title="Data Retention" icon="clock-rotate-left">
+    Configure auto-cleanup
+  </Card>
+</CardGroup>
+
+## Export Data
+
+Export all your tracking data to a JSON file for backup or analysis.
+
+### Export Process
+
+<Steps>
+  <Step title="Open Settings">
+    Click the settings icon in the extension popup
+  </Step>
+  
+  <Step title="Click Export Data">
+    Under "Data Management", click the "Export Data" button
+  </Step>
+  
+  <Step title="Save File">
+    Choose a location to save the JSON file (auto-named with current date)
+  </Step>
+  
+  <Step title="Verify Success">
+    You'll see a success message confirming the export
+  </Step>
+</Steps>
+
+### Export Implementation
+
+The export process reads all data from IndexedDB:
+
+```typescript
+export async function exportAllData(): Promise<IExportData> {
+  return await db.transaction('r', [db.history, db.sites, db.pages], async () => {
+    const history = await db.history.toArray();
+    const sites = await db.sites.toArray();
+    const pages = await db.pages.toArray();
+    
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      history,
+      sites,
+      pages
+    };
+  });
+}
+```
+
+The UI handles file creation and download:
+
+```typescript
+const handleExport = async () => {
+  try {
+    const data = await exportAllData();
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lumintime-backup-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    message.value = { text: 'Export successful!', type: 'success' };
+  } catch (e) {
+    console.error('Export failed', e);
+    message.value = { text: 'Export failed: ' + (e as Error).message, type: 'error' };
+  }
+};
+```
+
+<Info>
+Exports are formatted with 2-space indentation for readability. A typical export with one month of data is 500KB-2MB.
+</Info>
+
+### Export Format
+
+The exported JSON follows this structure:
+
+```json
+{
+  "version": 1,
+  "exportedAt": "2026-03-08T12:00:00.000Z",
+  "history": [
+    {
+      "id": 1,
+      "date": "2026-03-08",
+      "hostname": "github.com",
+      "path": "/anomalyco/lumintime",
+      "startTime": 1741478400000,
+      "duration": 125000,
+      "title": "LuminTime Repository",
+      "eventSource": "tab_activated"
+    }
+  ],
+  "sites": [
+    {
+      "date": "2026-03-08",
+      "hostname": "github.com",
+      "duration": 5400000,
+      "lastVisit": 1741485600000,
+      "iconUrl": "https://github.com/favicon.ico"
+    }
+  ],
+  "pages": [
+    {
+      "date": "2026-03-08",
+      "hostname": "github.com",
+      "path": "/anomalyco/lumintime",
+      "fullPath": "github.com/anomalyco/lumintime",
+      "duration": 3600000,
+      "title": "LuminTime Repository"
+    }
+  ]
+}
+```
+
+<Note>
+The `version` field allows for future format changes while maintaining backward compatibility.
+</Note>
+
+### What's Included
+
+Exports contain:
+
+✅ **History logs**: All raw activity records
+✅ **Sites data**: Daily site aggregates
+✅ **Pages data**: Daily page aggregates
+✅ **Metadata**: Export timestamp and format version
+
+What's **not** included:
+
+❌ Blocklist (configuration, not data)
+❌ Retention settings (configuration)
+❌ Hourly aggregated stats (can be reconstructed)
+❌ UI preferences
+
+<Warning>
+Exported files may contain sensitive browsing data. Store them securely and avoid sharing them publicly.
+</Warning>
+
+## Import Data
+
+Restore data from a previous export or migrate from another installation.
+
+### Import Process
+
+<Steps>
+  <Step title="Open Settings">
+    Navigate to the settings page
+  </Step>
+  
+  <Step title="Click Import Data">
+    Under "Data Management", click the "Import Data" button
+  </Step>
+  
+  <Step title="Select File">
+    Choose a previously exported JSON file
+  </Step>
+  
+  <Step title="Wait for Import">
+    The extension processes and merges the data (may take a few seconds for large files)
+  </Step>
+  
+  <Step title="Verify Success">
+    You'll see a success message and updated statistics
+  </Step>
+</Steps>
+
+### Import Implementation
+
+The import process validates and merges data:
+
+```typescript
+export async function importData(data: IExportData): Promise<void> {
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid data format');
+  }
+  
+  // Basic validation
+  if (!Array.isArray(data.history) || !Array.isArray(data.sites) || !Array.isArray(data.pages)) {
+    throw new Error('Invalid data structure: missing required arrays');
+  }
+  
+  await db.transaction('rw', [db.history, db.sites, db.pages], async () => {
+    if (data.history.length > 0) {
+      await db.history.bulkPut(data.history);
+    }
+    if (data.sites.length > 0) {
+      await db.sites.bulkPut(data.sites);
+    }
+    if (data.pages.length > 0) {
+      await db.pages.bulkPut(data.pages);
+    }
+  });
+}
+```
+
+The UI handles file selection and feedback:
+
+```typescript
+const handleFileChange = async (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+  
+  importing.value = true;
+  message.value = null;
+  
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text) as IExportData;
+    await importData(data);
+    message.value = { text: 'Import successful!', type: 'success' };
+    
+    // Refresh stats after import
+    await loadStats();
+    
+    // Clear input to allow re-selecting same file if needed
+    target.value = '';
+  } catch (e) {
+    console.error('Import failed', e);
+    message.value = { text: 'Import failed: ' + (e as Error).message, type: 'error' };
+  } finally {
+    importing.value = false;
+  }
+};
+```
+
+<Info>
+Import uses `bulkPut()` which merges data intelligently - duplicate records are updated, new records are added.
+</Info>
+
+### Merge Behavior
+
+When importing data:
+
+- **History**: Records with matching IDs are updated, new IDs are inserted
+- **Sites**: Records with matching `[date+hostname]` are replaced
+- **Pages**: Records with matching `[date+hostname+path]` are replaced
+
+```typescript
+// bulkPut merges based on primary key
+await db.history.bulkPut(data.history);
+// Each record is:
+// - Updated if id exists
+// - Inserted if id is new
+// - Auto-incremented id if not provided
+```
+
+<Warning>
+Importing data doesn't delete existing records. It only adds or updates. To start fresh, delete all data before importing.
+</Warning>
+
+### Import Validation
+
+The import process validates data structure:
+
+```typescript
+if (!data || typeof data !== 'object') {
+  throw new Error('Invalid data format');
+}
+
+if (!Array.isArray(data.history) || !Array.isArray(data.sites) || !Array.isArray(data.pages)) {
+  throw new Error('Invalid data structure: missing required arrays');
+}
+```
+
+Invalid imports will fail with an error message:
+- "Invalid data format" - File is not valid JSON or wrong structure
+- "Invalid data structure" - Missing required arrays
+- JSON parse errors - File is corrupted
+
+## Data Retention
+
+Configure how long raw history logs are kept before being aggregated.
+
+### Retention Settings
+
+Choose retention period in settings:
+
+```typescript
+const retentionOptions = [7, 14, 30, 90]; // days
+
+const handleRetentionChange = async (event: Event) => {
+  const target = event.target as HTMLSelectElement;
+  const days = parseInt(target.value, 10);
+  retentionDays.value = days;
+  await setRawRetentionDays(days);
+};
+```
+
+<CardGroup cols={4}>
+  <Card title="7 Days" icon="1">
+    Minimal storage (default)
+  </Card>
+  <Card title="14 Days" icon="2">
+    Two weeks of granular logs
+  </Card>
+  <Card title="30 Days" icon="3">
+    One month of detail
+  </Card>
+  <Card title="90 Days" icon="9">
+    Maximum granularity
+  </Card>
+</CardGroup>
+
+### How Retention Works
+
+Raw history logs older than the retention period are aggregated into hourly summaries:
+
+```typescript
+export async function runRetentionJob(maxDays = 3): Promise<void> {
+  const rawRetentionDays = await getRawRetentionDays();
+  const cutoff = formatDate(addDays(parseDate(getTodayStr()), -(rawRetentionDays - 1)));
+  
+  // Process up to maxDays oldest records
+  for (let i = 0; i < maxDays; i++) {
+    const oldest = await db.history.orderBy('date').first();
+    if (!oldest || oldest.date >= cutoff) break;
+    await aggregateOneDay(oldest.date);
+  }
+}
+```
+
+### Aggregation Process
+
+Old logs are converted to hourly summaries:
+
+```typescript
+export async function aggregateOneDay(date: string): Promise<void> {
+  await db.transaction('rw', db.hourlyStats, db.history, async () => {
+    const hours = new Float64Array(24);
+    
+    // Sum duration by hour
+    await db.history
+      .where('date')
+      .equals(date)
+      .each((r) => {
+        const h = new Date(r.startTime).getHours();
+        if (h >= 0 && h < 24) hours[h] += r.duration;
+      });
+    
+    // Create hourly summary records
+    const rows = Array.from(hours)
+      .map((duration, hour) => ({ date, hour, duration }))
+      .filter((r) => r.duration > 0);
+    
+    // Replace old summaries and delete raw logs
+    await db.hourlyStats.where('date').equals(date).delete();
+    await db.hourlyStats.bulkPut(rows);
+    await db.history.where('date').equals(date).delete();
+  });
+}
+```
+
+<Note>
+Aggregation preserves total time per hour but removes granular details like individual page visits and exact timestamps.
+</Note>
+
+### Retention Schedule
+
+The retention job runs automatically:
+
+```typescript
+const RETENTION_ALARM_NAME = 'retention-cleanup';
+const RETENTION_ALARM_PERIOD = 60; // minutes
+
+browser.alarms.create(RETENTION_ALARM_NAME, {
+  delayInMinutes: 2,      // First run 2 minutes after startup
+  periodInMinutes: RETENTION_ALARM_PERIOD  // Then every hour
+});
+```
+
+Each run processes up to 3 days worth of old logs:
+
+```typescript
+browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === RETENTION_ALARM_NAME) {
+    safeRunRetention().catch((error) => {
+      console.error('Retention job failed:', error);
+    });
+  }
+});
+```
+
+<Info>
+Retention runs incrementally to avoid blocking the main thread. Large backlogs are processed over multiple runs.
+</Info>
+
+### What's Preserved After Aggregation
+
+After aggregation, you still have:
+
+✅ **Total time per hour** for each day
+✅ **Daily site statistics** (never deleted)
+✅ **Daily page statistics** (never deleted)
+✅ **Weekly and monthly trends** (computed from daily stats)
+
+What's lost:
+
+❌ Individual session timestamps
+❌ Event sources (tab_activated, navigation, etc.)
+❌ Exact sequence of page visits
+
+### Storage Impact
+
+Retention reduces storage significantly:
+
+| Duration | Raw Logs | Hourly Summaries | Reduction |
+|----------|----------|------------------|------------|
+| 1 day | ~500 records | 24 records | 95% |
+| 7 days | ~3,500 records | 168 records | 95% |
+| 30 days | ~15,000 records | 720 records | 95% |
+
+<Note>
+Typical active browsing generates 50-100 raw log entries per day. Hourly aggregation reduces this to exactly 24 records per day.
+</Note>
+
+## Database Statistics
+
+View real-time database statistics in settings:
+
+```typescript
+export async function getDatabaseStats(): Promise<IDbStats> {
+  const historyCount = await db.history.count();
+  const sitesCount = await db.sites.count();
+  const pagesCount = await db.pages.count();
+  
+  // Get storage usage from Storage API
+  let storageUsage: number | undefined;
+  if ('storage' in navigator && 'estimate' in navigator.storage) {
+    const estimate = await navigator.storage.estimate();
+    storageUsage = estimate.usage;
+  }
+  
+  return {
+    historyCount,
+    sitesCount,
+    pagesCount,
+    storageUsage
+  };
+}
+```
+
+The UI displays:
+- **History Rows**: Number of raw log entries
+- **Sites Rows**: Number of site aggregate records
+- **Pages Rows**: Number of page aggregate records
+- **Storage Usage**: Total origin storage (all IndexedDB databases)
+
+<Info>
+Storage usage includes all IndexedDB data for the extension's origin, not just LuminTime's database.
+</Info>
+
+## Delete Site Data
+
+Remove all data for a specific site:
+
+```typescript
+export async function deleteSiteData(hostname: string): Promise<void> {
+  await db.transaction('rw', db.history, db.sites, db.pages, async () => {
+    const historyKeys = await db.history
+      .filter((record) => record.hostname === hostname)
+      .primaryKeys();
+    const pageKeys = await db.pages
+      .filter((record) => record.hostname === hostname)
+      .primaryKeys();
+    
+    await Promise.all([
+      historyKeys.length > 0 ? db.history.bulkDelete(historyKeys) : Promise.resolve(),
+      db.sites.where('hostname').equals(hostname).delete(),
+      pageKeys.length > 0 ? db.pages.bulkDelete(pageKeys) : Promise.resolve()
+    ]);
+  });
+}
+```
+
+This removes:
+- All history logs for the site
+- All daily site statistics
+- All daily page statistics
+
+<Warning>
+Deleting site data is permanent and cannot be undone. Make sure to export your data first if you want to preserve it.
+</Warning>
+
+## Best Practices
+
+### Regular Backups
+
+<Steps>
+  <Step title="Set a Schedule">
+    Export your data weekly or monthly
+  </Step>
+  
+  <Step title="Use Dated Filenames">
+    Keep multiple backups with dates (auto-generated by export)
+  </Step>
+  
+  <Step title="Store Securely">
+    Keep backups in encrypted storage or cloud backup
+  </Step>
+  
+  <Step title="Test Imports">
+    Periodically test importing to verify backup integrity
+  </Step>
+</Steps>
+
+### Retention Strategy
+
+Choose retention based on your needs:
+
+- **7 days**: Good for general usage tracking, minimal storage
+- **14 days**: Better for weekly comparisons and recent analysis
+- **30 days**: Ideal for monthly reviews and detailed history
+- **90 days**: Maximum detail for long-term analysis
+
+<Info>
+You can change retention settings anytime. The new setting applies to future aggregation - existing data is not affected retroactively.
+</Info>
+
+### Data Hygiene
+
+- Add sensitive sites to blocklist **before** visiting them
+- Regularly review and delete old sites you no longer track
+- Export before major browser updates or reinstalls
+- Keep export files secure and delete old ones
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Privacy" icon="shield" href="/features/privacy">
+    Learn about data privacy and security
+  </Card>
+  <Card title="Analytics" icon="chart-line" href="/features/analytics">
+    View your time analytics
+  </Card>
+  <Card title="Blocklist" icon="ban" href="/features/blocklist">
+    Exclude sites from tracking
+  </Card>
+  <Card title="Session Tracking" icon="clock" href="/features/session-tracking">
+    Understand how data is collected
+  </Card>
+</CardGroup>

@@ -1,0 +1,160 @@
+---
+title: 'useDateRange'
+description: 'Vue composable for managing date ranges and view modes in the LuminTime extension'
+---
+
+## Overview
+
+The `useDateRange` composable provides a complete solution for managing date navigation and view modes (day, week, month) in the LuminTime extension. It syncs with Vue Router query parameters and provides computed properties for date ranges, navigation controls, and user-friendly labels.
+
+## Import
+
+```typescript
+import { useDateRange, type ViewMode } from '@/composables/useDateRange'
+```
+
+## Type Definitions
+
+```typescript
+type ViewMode = "day" | "week" | "month"
+```
+
+## Usage
+
+### Basic Example
+
+```vue
+<script setup lang="ts">
+import { useDateRange } from '@/composables/useDateRange'
+
+const { 
+  view, 
+  startDate, 
+  endDate, 
+  label, 
+  next, 
+  prev, 
+  goToday, 
+  isToday, 
+  canNext 
+} = useDateRange()
+</script>
+
+<template>
+  <div>
+    <h1>{{ label }}</h1>
+    <button @click="prev">Previous</button>
+    <button @click="goToday" :disabled="isToday">Today</button>
+    <button @click="next" :disabled="!canNext">Next</button>
+    <p>Viewing: {{ startDate }} to {{ endDate }}</p>
+  </div>
+</template>
+```
+
+### Real-World Example
+
+From `HistoryView.vue`:
+
+```vue
+<script setup lang="ts">
+import { watch } from 'vue'
+import { useDateRange } from '@/composables/useDateRange'
+import { getHistoryLogs } from '@/db/service'
+
+const { view, startDate, endDate, label, next, prev, goToday, isToday, canNext } = useDateRange()
+const logs = ref([])
+
+const fetchData = async () => {
+  logs.value = await getHistoryLogs(startDate.value, endDate.value)
+}
+
+// Automatically refetch when date range changes
+watch([startDate, endDate], fetchData, { immediate: true })
+</script>
+```
+
+### Programmatic View Mode Changes
+
+```typescript
+const { view } = useDateRange()
+
+// Switch to week view
+view.value = 'week'
+
+// Switch to month view
+view.value = 'month'
+```
+
+## Return Value
+
+The composable returns an object with the following properties and methods:
+
+<ResponseField name="view" type="WritableComputedRef<ViewMode>">
+  Current view mode ('day', 'week', or 'month'). Synced with the `?view` query parameter. Defaults to 'day' if invalid or not present.
+</ResponseField>
+
+<ResponseField name="date" type="WritableComputedRef<string>">
+  Currently selected date in YYYY-MM-DD format. Synced with the `?date` query parameter. Defaults to today if invalid or not present.
+</ResponseField>
+
+<ResponseField name="startDate" type="ComputedRef<string>">
+  Start date of the current range in YYYY-MM-DD format. For 'day' view, equals `date`. For 'week' view, the start of the week. For 'month' view, the first day of the month.
+</ResponseField>
+
+<ResponseField name="endDate" type="ComputedRef<string>">
+  End date of the current range in YYYY-MM-DD format. For 'day' view, equals `date`. For 'week' view, the end of the week. For 'month' view, the last day of the month.
+</ResponseField>
+
+<ResponseField name="label" type="ComputedRef<string>">
+  Human-readable label for the current date range. Examples:
+  - Day view: "Today" or "Mar 8, 2026"
+  - Week view: "Mar 2 - Mar 8"
+  - Month view: "March 2026"
+</ResponseField>
+
+<ResponseField name="isToday" type="ComputedRef<boolean>">
+  Whether the current date range includes today's date.
+</ResponseField>
+
+<ResponseField name="canNext" type="ComputedRef<boolean>">
+  Whether navigation to the next period is allowed. Returns `false` when the end date is today or in the future (prevents navigating beyond today).
+</ResponseField>
+
+<ResponseField name="next" type="() => void">
+  Navigate to the next period (next day, week, or month depending on view mode).
+</ResponseField>
+
+<ResponseField name="prev" type="() => void">
+  Navigate to the previous period (previous day, week, or month depending on view mode).
+</ResponseField>
+
+<ResponseField name="goToday" type="() => void">
+  Navigate to today's date.
+</ResponseField>
+
+## Query Parameter Sync
+
+The composable automatically syncs with Vue Router query parameters:
+
+- `?view=day|week|month` - Controls the view mode
+- `?date=YYYY-MM-DD` - Controls the selected date
+
+Changing the returned `view` or `date` refs will update the URL, and navigating with URL changes will update the composable state.
+
+## Validation
+
+The composable uses [Arktype](https://arktype.io/) for runtime validation:
+
+- Invalid view modes default to `'day'`
+- Invalid dates default to today's date
+- Date format must be `YYYY-MM-DD`
+
+## Dependencies
+
+This composable requires:
+- Vue Router (uses `useRoute` and `useRouter`)
+- Date utility functions from `@/utils/dateUtils`
+
+## Source
+
+View the source code: [`src/composables/useDateRange.ts`](https://github.com/yourusername/lumintime/blob/main/src/composables/useDateRange.ts)

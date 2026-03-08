@@ -1,97 +1,142 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "LuminTime"
+description: "A privacy-first browser extension that automatically tracks your online activity with local-only storage"
 ---
 
-## Setting up
+<div style={{
+  background: "linear-gradient(135deg, #020627 0%, #11161e 100%)",
+  borderRadius: "12px",
+  padding: "3rem 2rem",
+  marginBottom: "2rem",
+  border: "1px solid rgba(96,99,146,1)"
+}}>
+  <h1 style={{
+    fontFamily: "Inter",
+    fontWeight: 700,
+    fontSize: "48px",
+    color: "#ffffff",
+    marginBottom: "1rem",
+    textAlign: "center"
+  }}>
+    Take Control of Your Time
+  </h1>
+  <p style={{
+    fontFamily: "Inter",
+    fontSize: "20px",
+    color: "#cfd0d2",
+    textAlign: "center",
+    maxWidth: "700px",
+    margin: "0 auto 2rem"
+  }}>
+    LuminTime automatically tracks your browsing activity with complete privacy. All data stays local—no cloud sync, no accounts, no telemetry.
+  </p>
+  <div style={{
+    display: "flex",
+    gap: "1rem",
+    justifyContent: "center",
+    flexWrap: "wrap"
+  }}>
+    <a 
+      href="/quickstart"
+      style={{
+        background: "#238636",
+        color: "#ffffff",
+        padding: "0.75rem 1.5rem",
+        borderRadius: "6px",
+        textDecoration: "none",
+        fontFamily: "Inter",
+        fontWeight: 600,
+        fontSize: "16px",
+        display: "inline-block"
+      }}
+    >
+      Get Started
+    </a>
+    <a 
+      href="https://chromewebstore.google.com/detail/lumin-time/elfkjlledpjmjehekdklejboanfbffak"
+      style={{
+        background: "transparent",
+        color: "#ffffff",
+        padding: "0.75rem 1.5rem",
+        borderRadius: "6px",
+        border: "1px solid rgba(96,99,146,1)",
+        textDecoration: "none",
+        fontFamily: "Inter",
+        fontWeight: 600,
+        fontSize: "16px",
+        display: "inline-block"
+      }}
+    >
+      Install Extension
+    </a>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+## Key Features
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Background Session Tracking" icon="clock" href="/features/session-tracking">
+    Monitors active tabs automatically using the Browser Tabs API with idle detection
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Privacy by Design" icon="shield" href="/features/privacy">
+    All data stored locally in IndexedDB—no cloud sync, no accounts, no telemetry
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Time Analytics" icon="chart-line" href="/features/analytics">
+    View daily and hourly trends with detailed breakdowns per site and page
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Site Blocklist" icon="ban" href="/features/blocklist">
+    Exclude specific domains from tracking for complete control
   </Card>
-</Columns>
+  <Card title="Data Management" icon="database" href="/features/data-management">
+    Export and import your data in JSON format for backup and portability
+  </Card>
+  <Card title="Zero Telemetry" icon="lock" href="/features/privacy">
+    Complete data ownership with no external requests or analytics
+  </Card>
+</CardGroup>
 
-## Create beautiful pages
+## Quick Navigation
 
-Everything you need to create world-class documentation.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install from Chrome Web Store or load the extension locally
+  </Card>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Get up and running in minutes with your first tracked session
+  </Card>
+  <Card title="Developer Guide" icon="code" href="/developer/architecture">
+    Learn about the architecture, database design, and development workflow
+  </Card>
+  <Card title="API Reference" icon="terminal" href="/api/database/service">
+    Explore the database API, composables, and utility functions
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## How It Works
 
-## Need inspiration?
+<Steps>
+  <Step title="Background Monitoring">
+    The extension monitors active tabs via the Browser Tabs API, detecting window focus and idle state changes
+  </Step>
+  <Step title="Local Storage">
+    All tracking data is stored in IndexedDB using Dexie.js with three layers: raw history logs, site aggregates, and page details
+  </Step>
+  <Step title="Analytics Dashboard">
+    View your activity in the popup with total time, daily/hourly trends, and top sites ranked by duration
+  </Step>
+</Steps>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
+## Tech Stack
+
+Built with modern web technologies for performance and reliability:
+
+- **WXT** — Modern web extension framework with HMR support
+- **Vue 3** — Progressive JavaScript framework with Composition API
+- **Dexie.js** — Wrapper library for IndexedDB with reactive queries
+- **Tailwind CSS 4** — Utility-first CSS framework
+- **Arktype** — Runtime type validation
+- **Vitest** — Unit test framework
+
+<Card title="View on GitHub" icon="github" href="https://github.com/nuttycc/LuminTime">
+  Star the repository and contribute to the project
 </Card>

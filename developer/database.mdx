@@ -1,0 +1,411 @@
+---
+title: Database Schema
+description: IndexedDB structure with Dexie.js and the three-layer data model
+---
+
+## Overview
+
+LuminTime uses **IndexedDB** for local storage via **Dexie.js**, a powerful wrapper that provides:
+
+- Type-safe database operations
+- Query optimization with compound indexes
+- Schema versioning and migrations
+- Transaction management
+
+All data stays on the user's device—no cloud sync, no external servers.
+
+## Database Instance
+
+Defined in `src/db/index.ts`:
+
+```typescript
+import { Dexie, type Table } from "dexie";
+import type { IHistoryLog, ISiteStat, IPageStat, IHourlyStat } from "./types";
+
+export class LuminTimeDB extends Dexie {
+  history!: Table<IHistoryLog>;
+  sites!: Table<ISiteStat>;
+  pages!: Table<IPageStat>;
+  hourlyStats!: Table<IHourlyStat>;
+  meta!: Table<{ key: string; value: unknown }>;
+
+  constructor() {
+    super("LuminTimeDB");
+    
+    this.version(2).stores({
+      history: "++id, date, [date+hostname], startTime",
+      sites: "[date+hostname], date, hostname, duration",
+      pages: "[date+hostname+path], date, [date+hostname], duration",
+      hourlyStats: "[date+hour], date",
+      meta: "&key",
+    });
+  }
+}
+
+export const db = new LuminTimeDB();
+```
+
+## Three-Layer Data Model
+
+LuminTime uses a multi-layer approach optimized for different query patterns:
+
+<Steps>
+  <Step title="L1: Raw History Logs">
+    Immutable audit trail of every activity session.
+    
+    **Use cases:** History view, data export, debugging
+  </Step>
+  
+  <Step title="L2: Site Aggregates">
+    Daily summaries per domain for dashboard rankings.
+    
+    **Use cases:** Home dashboard, top sites, daily totals
+  </Step>
+  
+  <Step title="L3: Page Details">
+    Per-page breakdowns within each site.
+    
+    **Use cases:** Site detail views, page-level analytics
+  </Step>
+</Steps>
+
+<Note>
+  This layered approach trades storage space for query performance. Dashboard queries hit L2 directly instead of aggregating thousands of L1 records.
+</Note>
+
+## Schema Details
+
+### L1: History Table
+
+Raw activity logs with auto-incrementing ID:
+
+```typescript
+interface IHistoryLog {
+  id?: number;              // Auto-increment primary key
+  date: string;             // YYYY-MM-DD format
+  hostname: string;         // e.g., "developer.chrome.com"
+  path: string;             // e.g., "/extensions/mv3"
+  startTime: number;        // Unix timestamp (ms)
+  duration: number;         // Session duration (ms)
+  title?: string;           // Page title
+  eventSource?: EventSource; // How session started
+}
+
+type EventSource = 
+  | "tab_activated"   // User switched tabs
+  | "navigation"      // Page navigation
+  | "window_focus"    // Browser window gained focus
+  | "idle_resume"     // User returned from idle
+  | "alarm";          // Periodic session update
+```
+
+**Indexes:**
+- `++id`: Auto-increment primary key
+- `date`: Query by day for history view
+- `[date+hostname]`: Efficient filtering by day + site
+- `startTime`: Sort by chronological order
+
+**Example Query:**
+
+```typescript
+// Get today's history for a specific site
+const logs = await db.history
+  .where('[date+hostname]')
+  .equals(['2026-03-08', 'github.com'])
+  .sortBy('startTime');
+```
+
+### L2: Sites Table
+
+Daily site-level aggregates:
+
+```typescript
+interface ISiteStat {
+  date: string;        // YYYY-MM-DD
+  hostname: string;    // Root domain
+  duration: number;    // Total time (ms)
+  lastVisit: number;   // Last activity timestamp
+  iconUrl?: string;    // Favicon URL
+}
+```
+
+**Primary Key:** `[date+hostname]` (compound key ensures one record per site per day)
+
+**Indexes:**
+- `[date+hostname]`: Primary key for fast lookups
+- `date`: Query all sites for a given day
+- `hostname`: Track site across multiple days
+- `duration`: Sort by time spent (rankings)
+
+**Example Query:**
+
+```typescript
+// Get top 10 sites for today, sorted by duration
+const topSites = await db.sites
+  .where('date')
+  .equals('2026-03-08')
+  .reverse()
+  .sortBy('duration')
+  .then(sites => sites.slice(0, 10));
+```
+
+### L3: Pages Table
+
+Page-level details within each site:
+
+```typescript
+interface IPageStat {
+  date: string;        // YYYY-MM-DD
+  hostname: string;    // Root domain
+  path: string;        // URL path (normalized)
+  fullPath: string;    // Full URL for display
+  duration: number;    // Total time (ms)
+  title?: string;      // Last known page title
+}
+```
+
+**Primary Key:** `[date+hostname+path]` (one record per page per site per day)
+
+**Indexes:**
+- `[date+hostname+path]`: Primary key
+- `date`: Query all pages for a day
+- `[date+hostname]`: Get all pages for a site on a day
+- `duration`: Sort pages by time spent
+
+**Example Query:**
+
+```typescript
+// Get all pages for github.com today
+const pages = await db.pages
+  .where('[date+hostname]')
+  .equals(['2026-03-08', 'github.com'])
+  .reverse()
+  .sortBy('duration');
+```
+
+### L1.5: Hourly Stats Table
+
+Aggregated hourly data generated by retention jobs:
+
+```typescript
+interface IHourlyStat {
+  date: string;    // YYYY-MM-DD
+  hour: number;    // 0-23
+  duration: number; // Total duration (ms)
+}
+```
+
+**Primary Key:** `[date+hour]`
+
+**Use Case:** Time-series charts showing activity distribution throughout the day.
+
+**Example Query:**
+
+```typescript
+// Get hourly breakdown for today
+const hourlyData = await db.hourlyStats
+  .where('date')
+  .equals('2026-03-08')
+  .toArray();
+```
+
+### Meta Table
+
+Key-value store for settings and metadata:
+
+```typescript
+interface IMeta {
+  key: string;      // Unique key (primary)
+  value: unknown;   // Any JSON-serializable value
+}
+```
+
+**Example Usage:**
+
+```typescript
+// Store user preference
+await db.meta.put({ key: 'retentionDays', value: 30 });
+
+// Retrieve setting
+const setting = await db.meta.get('retentionDays');
+const days = setting?.value ?? 7; // Default to 7
+```
+
+## Type Safety with Arktype
+
+All data types are validated at runtime using **Arktype**:
+
+```typescript
+import { type } from "arktype";
+
+export const HistoryLog = type({
+  "id?": "number",
+  date: "string",
+  hostname: "string",
+  path: "string",
+  startTime: "number",
+  duration: "number",
+  "title?": "string",
+  "eventSource?": "'tab_activated' | 'navigation' | 'window_focus' | 'idle_resume' | 'alarm'",
+});
+
+export type IHistoryLog = typeof HistoryLog.infer;
+```
+
+This provides:
+- Compile-time type checking via TypeScript
+- Runtime validation when parsing user data
+- Self-documenting schema definitions
+
+## Database Operations
+
+### Recording Activity
+
+From `src/db/service.ts`:
+
+```typescript
+export async function recordActivity(data: {
+  url: string;
+  title?: string;
+  startTime: number;
+  duration: number;
+  eventSource?: EventSource;
+}): Promise<void> {
+  const { hostname, pathname } = new URL(data.url);
+  const date = formatDate(data.startTime);
+  
+  await db.transaction('rw', db.history, db.sites, db.pages, async () => {
+    // L1: Create history log
+    await db.history.add({
+      date,
+      hostname,
+      path: pathname,
+      startTime: data.startTime,
+      duration: data.duration,
+      title: data.title,
+      eventSource: data.eventSource,
+    });
+    
+    // L2: Update or create site aggregate
+    const siteKey: [string, string] = [date, hostname];
+    const existingSite = await db.sites.get(siteKey);
+    
+    if (existingSite) {
+      await db.sites.update(siteKey, {
+        duration: existingSite.duration + data.duration,
+        lastVisit: data.startTime,
+      });
+    } else {
+      await db.sites.add({
+        date,
+        hostname,
+        duration: data.duration,
+        lastVisit: data.startTime,
+      });
+    }
+    
+    // L3: Update or create page detail
+    const pageKey: [string, string, string] = [date, hostname, pathname];
+    const existingPage = await db.pages.get(pageKey);
+    
+    if (existingPage) {
+      await db.pages.update(pageKey, {
+        duration: existingPage.duration + data.duration,
+        title: data.title,
+      });
+    } else {
+      await db.pages.add({
+        date,
+        hostname,
+        path: pathname,
+        fullPath: data.url,
+        duration: data.duration,
+        title: data.title,
+      });
+    }
+  });
+}
+```
+
+<Note>
+  All three layers are updated atomically within a single transaction. If any write fails, all changes are rolled back.
+</Note>
+
+## Data Retention
+
+Automatic cleanup runs every 60 minutes via `src/db/retention.ts`:
+
+```typescript
+export async function runRetentionJob(maxDays: number = 30): Promise<void> {
+  const cutoffDate = getDateDaysAgo(maxDays);
+  
+  await db.transaction('rw', db.history, db.sites, db.pages, db.hourlyStats, async () => {
+    // Delete old records from all tables
+    await db.history.where('date').below(cutoffDate).delete();
+    await db.sites.where('date').below(cutoffDate).delete();
+    await db.pages.where('date').below(cutoffDate).delete();
+    await db.hourlyStats.where('date').below(cutoffDate).delete();
+  });
+  
+  console.log(`Retention job completed, deleted data before ${cutoffDate}`);
+}
+```
+
+## Schema Migrations
+
+Dexie handles versioning automatically:
+
+```typescript
+this.version(1).stores({
+  history: "++id, date, [date+hostname], startTime",
+  sites: "[date+hostname], date, hostname, duration",
+  pages: "[date+hostname+path], date, [date+hostname], duration",
+});
+
+this.version(2).stores({
+  // Added hourlyStats and meta tables
+  history: "++id, date, [date+hostname], startTime",
+  sites: "[date+hostname], date, hostname, duration",
+  pages: "[date+hostname+path], date, [date+hostname], duration",
+  hourlyStats: "[date+hour], date",
+  meta: "&key",
+});
+```
+
+When users upgrade, Dexie automatically creates new tables without losing existing data.
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Compound Indexes">
+    Queries like `where('[date+hostname]').equals([date, host])` are highly efficient thanks to compound indexes.
+  </Accordion>
+  
+  <Accordion title="Batch Operations in Transactions">
+    Group multiple writes in a single transaction to ensure atomicity and improve performance.
+  </Accordion>
+  
+  <Accordion title="Query the Right Layer">
+    - Dashboard → L2 (sites)
+    - Detail views → L3 (pages)
+    - History/export → L1 (history)
+  </Accordion>
+  
+  <Accordion title="Validate with Arktype">
+    Use Arktype schemas when parsing external data or user input to catch errors early.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/developer/architecture">
+    Understand how the database fits into the overall system
+  </Card>
+  <Card title="Development" icon="code" href="/developer/development">
+    Set up your local environment to work with the database
+  </Card>
+  <Card title="Testing" icon="flask" href="/developer/testing">
+    Write tests for database operations
+  </Card>
+</CardGroup>

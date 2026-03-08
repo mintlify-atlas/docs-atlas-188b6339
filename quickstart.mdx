@@ -1,80 +1,273 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get up and running with LuminTime in minutes
 ---
 
-## Get started in three steps
+# Quickstart Guide
 
-Get your documentation site running locally and make your first customization.
+This guide will help you get started with LuminTime quickly. Within minutes, you'll have the extension installed and tracking your browsing activity.
 
-### Step 1: Set up your local environment
+## Installation
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+<Steps>
+  <Step title="Install the Extension">
+    Install LuminTime from the [Chrome Web Store](https://chromewebstore.google.com/detail/lumin-time/elfkjlledpjmjehekdklejboanfbffak):
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    1. Click **"Add to Chrome"**
+    2. Confirm by clicking **"Add extension"**
+    3. The LuminTime icon will appear in your browser toolbar
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    <Info>
+      The extension begins tracking automatically after installation—no setup required.
+    </Info>
+  </Step>
+  
+  <Step title="Start Browsing">
+    Simply browse the web as you normally would. LuminTime runs silently in the background, tracking:
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    - Time spent on each website
+    - Active tab changes
+    - Window focus events
+    - Idle time detection
+    
+    <Note>
+      LuminTime only tracks when you're actively using a tab. If your computer goes idle or you switch to another application, tracking pauses automatically.
+    </Note>
+  </Step>
+  
+  <Step title="View Your Analytics">
+    Click the LuminTime icon in your browser toolbar to open the popup dashboard. You'll see:
+    
+    - Total time tracked today
+    - Top websites by duration
+    - Hourly activity distribution
+    - Daily usage trends
+  </Step>
+</Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Understanding the Dashboard
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+The LuminTime popup provides several views to explore your browsing data:
 
-### Step 3: Go live
+### Home View
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+The default view shows your current day's activity:
 
-## Next steps
+- **Total Time Today** – Cumulative time spent browsing
+- **Top Sites** – Websites ranked by time spent
+- **Hourly Breakdown** – Visual timeline of your activity
 
-Now that you have your docs running, explore these key features:
+### History View
 
-<CardGroup cols={2}>
+Access detailed historical data:
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+- Browse activity by date
+- See time spent per site for any day
+- Identify usage patterns over time
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+### Insights View
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+Get analytics on your browsing habits:
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+- Daily averages and trends
+- Most visited domains
+- Peak activity hours
 
-</CardGroup>
+### Site Details
+
+Click any website to see granular details:
+
+- Individual page visits
+- Time spent per URL
+- Navigation patterns within a domain
+
+## Key Concepts
+
+### Session Tracking
+
+LuminTime tracks browsing sessions using the Browser Tabs API:
+
+```typescript
+// Extension monitors these events:
+- tabs.onActivated   // When you switch tabs
+- tabs.onUpdated     // When a page loads or URL changes
+- windows.onFocusChanged  // When you switch browser windows
+- idle.onStateChanged     // When you step away from the computer
+```
+
+A "session" represents continuous time spent on a specific page. Sessions end when you:
+- Switch to a different tab
+- Navigate to a new page
+- Close the tab
+- Go idle (after system idle timeout)
+
+### Midnight Boundaries
+
+LuminTime automatically splits sessions at midnight (00:00) to ensure accurate daily analytics. If you're browsing at 11:45 PM and continue past midnight:
+
+- Session 1: 11:45 PM - 11:59:59 PM (counted for Day 1)
+- Session 2: 12:00 AM - [end time] (counted for Day 2)
+
+This ensures your daily totals are always accurate without manual intervention.
+
+### Local-First Storage
+
+All data is stored in IndexedDB with three layers:
+
+1. **Raw History Logs** – Granular session records with start/end times
+2. **Site Aggregates** – Daily totals per domain
+3. **Page Details** – URL-specific statistics
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  LuminTime uses [Dexie.js](https://dexie.dev/), a powerful IndexedDB wrapper, for efficient local storage. No data ever leaves your device.
 </Note>
+
+## Common Tasks
+
+### Viewing Today's Activity
+
+1. Click the LuminTime icon in your toolbar
+2. The Home view displays your current day's data
+3. Scroll through the list of sites to see where you spent time
+
+### Exploring Past Days
+
+1. Click **"History"** in the navigation
+2. Select a date from the calendar or list
+3. View that day's complete activity breakdown
+
+### Finding Site Details
+
+1. From any view, click on a website domain
+2. See a detailed breakdown of individual pages
+3. View timestamps and durations for each visit
+
+### Understanding Your Habits
+
+1. Navigate to **"Insights"**
+2. Review daily averages and patterns
+3. Identify peak browsing hours
+4. See long-term trends in your activity
+
+## Privacy & Data
+
+### What Data is Tracked?
+
+LuminTime records:
+- ✅ Website domains (e.g., `github.com`)
+- ✅ Full URLs (e.g., `github.com/nuttycc/LuminTime`)
+- ✅ Start and end timestamps
+- ✅ Duration spent on each page
+
+LuminTime does NOT record:
+- ❌ Page content or text
+- ❌ Passwords or form inputs
+- ❌ Cookies or authentication tokens
+- ❌ Screenshots or visual data
+
+### Where is Data Stored?
+
+All data lives in your browser's IndexedDB:
+
+```bash
+# Data location (Chrome on Linux)
+~/.config/google-chrome/Default/IndexedDB/chrome-extension_[id]/
+
+# Data location (Chrome on macOS)
+~/Library/Application Support/Google/Chrome/Default/IndexedDB/chrome-extension_[id]/
+
+# Data location (Chrome on Windows)
+%LOCALAPPDATA%\Google\Chrome\User Data\Default\IndexedDB\chrome-extension_[id]\
+```
+
+<Info>
+  Your data is isolated to your browser profile. If you use multiple Chrome profiles or browsers, each has its own separate LuminTime database.
+</Info>
+
+### Is My Data Synced?
+
+No. LuminTime deliberately does not use Chrome Sync or any cloud service. Your data stays on your device permanently. This means:
+
+- ✅ Complete privacy—no one can access your data
+- ⚠️ Data is not synced across devices
+- ⚠️ Uninstalling the extension deletes all data
+
+## Tips for Best Results
+
+### Keep the Extension Enabled
+
+LuminTime tracks continuously while enabled. If you disable it, tracking stops and you'll have gaps in your data.
+
+### Let It Run for a Few Days
+
+Meaningful insights emerge after a few days of tracking. Daily trends and weekly patterns become visible over time.
+
+### Check Insights Regularly
+
+The Insights view helps identify browsing habits. Review it weekly to understand how you spend time online.
+
+### Use Multiple Views
+
+Different views serve different purposes:
+- **Home** – Quick daily overview
+- **History** – Detailed past exploration
+- **Insights** – Pattern recognition and trends
+- **Site Details** – Granular per-page analysis
+
+## Troubleshooting
+
+### Extension Not Tracking
+
+If you're not seeing any data:
+
+1. Verify the extension is enabled in `chrome://extensions/`
+2. Check that the extension has necessary permissions
+3. Click the icon to open the popup—tracking starts immediately
+4. Browse for a few minutes, then check again
+
+### Missing Time Data
+
+If some sessions aren't recorded:
+
+1. Ensure you're not in Incognito mode (extensions are disabled by default)
+2. Check if the extension has permission to run in Incognito (if desired)
+3. Verify your system idle timeout isn't too aggressive
+
+### Data Suddenly Gone
+
+If your data disappears:
+
+1. Check if you accidentally cleared browser data (Settings → Privacy)
+2. Verify you're using the same browser profile
+3. Ensure the extension wasn't reinstalled (reinstalling wipes data)
+
+<Note>
+  Always be cautious when clearing browser data. IndexedDB is included in "Cookies and site data" and will be deleted if you clear it.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Explore the Source Code" icon="code" href="https://github.com/nuttycc/LuminTime">
+    Dive into the codebase to understand how LuminTime works
+  </Card>
+  <Card title="Report Issues" icon="bug" href="https://github.com/nuttycc/LuminTime/issues">
+    Found a bug or have a feature request? Let us know
+  </Card>
+  <Card title="Read the README" icon="book" href="https://github.com/nuttycc/LuminTime#readme">
+    Learn about the technical architecture and development
+  </Card>
+  <Card title="Contribute" icon="code-pull-request" href="https://github.com/nuttycc/LuminTime/blob/main/CONTRIBUTING.md">
+    Help improve LuminTime by contributing code or documentation
+  </Card>
+</CardGroup>
+
+## Get Help
+
+Need assistance? Here are your options:
+
+- **GitHub Issues** – [Report bugs or request features](https://github.com/nuttycc/LuminTime/issues)
+- **Discussions** – [Ask questions or share ideas](https://github.com/nuttycc/LuminTime/discussions)
+- **Source Code** – [Audit the codebase](https://github.com/nuttycc/LuminTime)
+
+LuminTime is open source under the MIT License. Your privacy and security are our top priorities.

@@ -1,0 +1,234 @@
+---
+title: 'useLiveQuery / useDexieLiveQuery'
+description: 'Vue composable for reactive Dexie.js queries with IndexedDB'
+---
+
+## Overview
+
+The `useLiveQuery` composable (also exported as `useDexieLiveQuery` for backwards compatibility) creates a reactive Vue ref that automatically updates when the underlying IndexedDB data changes. It's built on top of Dexie.js's `liveQuery` feature and integrates seamlessly with Vue 3's Composition API.
+
+<Warning>
+  `useDexieLiveQuery` is deprecated. Use `useLiveQuery` instead.
+</Warning>
+
+## Import
+
+```typescript
+import { useLiveQuery } from '@/composables/useDexieLiveQuery'
+```
+
+## Function Signatures
+
+```typescript
+// Without default value (returns Ref<T | undefined>)
+function useLiveQuery<T>(
+  querier: () => Promise<T>,
+  deps?: Ref | ComputedRef | unknown[]
+): Ref<T | undefined>
+
+// With default value (returns Ref<T>)
+function useLiveQuery<T>(
+  querier: () => Promise<T>,
+  defaultValue: T,
+  deps?: Ref | ComputedRef | unknown[]
+): Ref<T>
+```
+
+## Usage
+
+### Basic Example
+
+```vue
+<script setup lang="ts">
+import { useLiveQuery } from '@/composables/useDexieLiveQuery'
+import { db } from '@/db'
+
+const users = useLiveQuery(
+  () => db.users.toArray(),
+  [] // default value
+)
+</script>
+
+<template>
+  <ul>
+    <li v-for="user in users" :key="user.id">
+      {{ user.name }}
+    </li>
+  </ul>
+</template>
+```
+
+### With Dependencies
+
+The query automatically re-runs when any dependency changes:
+
+```vue
+<script setup lang="ts">
+import { ref, computed } from 'vue'
+import { useLiveQuery } from '@/composables/useDexieLiveQuery'
+import { getAggregatedPages } from '@/db/service'
+
+const hostname = ref('example.com')
+const startDate = ref('2026-03-01')
+const endDate = ref('2026-03-08')
+
+const pages = useLiveQuery(
+  () => getAggregatedPages(hostname.value, startDate.value, endDate.value),
+  [],
+  [hostname, startDate, endDate] // Dependencies
+)
+</script>
+```
+
+### Real-World Example
+
+From `SiteDetailView.vue`:
+
+```vue
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import { useDateRange } from '@/composables/useDateRange'
+import { useLiveQuery } from '@/composables/useDexieLiveQuery'
+import { getAggregatedPages, getBlocklist } from '@/db/service'
+import type { IPageStat } from '@/db/types'
+
+const route = useRoute()
+const { startDate, endDate } = useDateRange()
+const hostname = computed(() => route.params.hostname as string)
+
+// Query pages for a specific hostname
+const pages = useLiveQuery<IPageStat[]>(
+  () => {
+    if (!hostname.value) return Promise.resolve([])
+    return getAggregatedPages(hostname.value, startDate.value, endDate.value)
+  },
+  [],
+  [hostname, startDate, endDate]
+)
+
+// Query blocklist (simpler dependency)
+const blocklist = useLiveQuery<string[]>(
+  () => getBlocklist(),
+  [],
+  [hostname]
+)
+</script>
+```
+
+### Without Default Value
+
+```typescript
+const user = useLiveQuery(() => db.users.get(1))
+
+// user is Ref<User | undefined>
+if (user.value) {
+  console.log(user.value.name)
+}
+```
+
+## Parameters
+
+<ParamField path="querier" type="() => Promise<T>" required>
+  An async function that returns a Promise with the query result. This function is called immediately and whenever dependencies change.
+</ParamField>
+
+<ParamField path="defaultValue" type="T">
+  Optional default value to use before the first query completes. If provided, the returned ref will be `Ref<T>` instead of `Ref<T | undefined>`.
+</ParamField>
+
+<ParamField path="deps" type="Ref | ComputedRef | unknown[]">
+  Optional dependencies that trigger a re-query when changed. Can be:
+  - A single `Ref` or `ComputedRef`
+  - An array of refs, computed refs, or raw values
+  - If omitted, the query only runs once on mount
+</ParamField>
+
+## Return Value
+
+<ResponseField name="value" type="Ref<T | undefined> | Ref<T>">
+  A Vue ref containing the query result. The type depends on whether a default value was provided:
+  - With default value: `Ref<T>`
+  - Without default value: `Ref<T | undefined>`
+  
+  The ref automatically updates when the underlying IndexedDB data changes or when dependencies change.
+</ResponseField>
+
+## Behavior
+
+### Automatic Cleanup
+
+The composable automatically handles cleanup:
+- Unsubscribes from Dexie live queries when the component unmounts
+- Stops watching dependencies on unmount
+- Uses Vue's `onScopeDispose` for proper cleanup
+
+### SSR Safety
+
+The composable checks for IndexedDB availability:
+```typescript
+const hasIndexedDb = isClient && 'indexedDB' in globalThis
+```
+
+If IndexedDB is not available (e.g., SSR context), it returns a ref with the default value and doesn't set up any subscriptions.
+
+### Error Handling
+
+Errors from Dexie queries are logged to the console:
+```typescript
+error: (error: Error) => {
+  console.error('Dexie live query error:', error)
+}
+```
+
+## Dependency Watching
+
+When dependencies are provided, the composable uses Vue's `watch` to re-run the query:
+
+```typescript
+const userId = ref(1)
+
+const user = useLiveQuery(
+  () => db.users.get(userId.value),
+  undefined,
+  [userId] // Re-query when userId changes
+)
+
+// Later...
+userId.value = 2 // Query automatically re-runs
+```
+
+## Type Safety
+
+The composable is fully typed with TypeScript:
+
+```typescript
+interface User {
+  id: number
+  name: string
+}
+
+// Type inference works automatically
+const users = useLiveQuery<User[]>(
+  () => db.users.toArray(),
+  []
+)
+// users is Ref<User[]>
+```
+
+## Performance Considerations
+
+- The composable uses Dexie's efficient change detection
+- Only re-renders when the actual query result changes
+- Dependency watching is optimized with Vue's reactivity system
+- Subscriptions are properly cleaned up to prevent memory leaks
+
+## Related
+
+- [Dexie liveQuery](https://dexie.org/docs/liveQuery())
+- [Vue Composition API](https://vuejs.org/guide/extras/composition-api-faq.html)
+- Database Service API
+
+## Source
+
+View the source code: [`src/composables/useDexieLiveQuery.ts`](https://github.com/yourusername/lumintime/blob/main/src/composables/useDexieLiveQuery.ts)

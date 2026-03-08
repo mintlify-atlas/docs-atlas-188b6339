@@ -1,0 +1,111 @@
+---
+title: Introduction
+description: Learn about LuminTime - a privacy-first browser extension for automatic activity tracking
+---
+
+# Welcome to LuminTime
+
+LuminTime is a **privacy-first browser extension** that automatically tracks your online activity. Built for users who value data ownership, LuminTime keeps all your browsing data local—no cloud sync, no accounts, no telemetry.
+
+<CardGroup cols={2}>
+  <Card title="100% Local Storage" icon="database">
+    All data stored in IndexedDB. Your activity never leaves your device.
+  </Card>
+  <Card title="Zero Telemetry" icon="shield-check">
+    No tracking, no analytics, no external requests. Complete privacy.
+  </Card>
+  <Card title="Automatic Tracking" icon="clock">
+    Background monitoring of active tabs and time spent per site.
+  </Card>
+  <Card title="Time Analytics" icon="chart-line">
+    View daily and hourly trends with detailed insights per domain.
+  </Card>
+</CardGroup>
+
+## What is LuminTime?
+
+LuminTime is a browser extension that runs quietly in the background, automatically tracking which websites you visit and how much time you spend on them. Unlike other time-tracking tools, LuminTime is built with privacy as the foundation:
+
+- **No Authentication Required** – Install and start tracking immediately
+- **Local-First Architecture** – Uses IndexedDB for all data storage
+- **Privacy by Design** – Zero cloud services or external dependencies
+- **Open Source** – Fully transparent codebase you can audit
+
+## Why Choose LuminTime?
+
+### Privacy Without Compromise
+
+Every piece of data—browsing history, time analytics, and site statistics—stays on your device. LuminTime makes zero network requests for data sync or telemetry.
+
+### Effortless Tracking
+
+Once installed, LuminTime works automatically. It monitors:
+- Active tab changes
+- Window focus events
+- Idle state detection
+- Time spent per domain and page
+
+### Detailed Analytics
+
+Access comprehensive insights through the extension popup:
+- Total time spent online
+- Daily and hourly usage patterns
+- Top sites ranked by duration
+- Per-page granular breakdown
+
+<Note>
+  LuminTime splits sessions at midnight boundaries, ensuring accurate daily analytics without manual intervention.
+</Note>
+
+## How It Works
+
+<Steps>
+  <Step title="Background Monitoring">
+    The background script uses the Browser Tabs API to track active tabs, detecting window focus changes and idle states.
+  </Step>
+  
+  <Step title="Time Recording">
+    LuminTime captures time spent on each domain and page, automatically handling midnight boundaries for accurate daily splits.
+  </Step>
+  
+  <Step title="Local Storage">
+    Data is stored in three layers using Dexie.js:
+    - Raw history logs for granular tracking
+    - Site aggregates for domain-level statistics
+    - Page details for URL-specific insights
+  </Step>
+  
+  <Step title="Analytics Dashboard">
+    The popup interface displays your time analytics with daily/hourly trends and top sites, all rendered instantly from local data.
+  </Step>
+</Steps>
+
+## Key Features
+
+- **Background Session Tracking** – Monitors active tabs and captures time spent per domain and page
+- **Local-First Storage** – All data stored in IndexedDB; nothing synced to the cloud
+- **Privacy by Design** – No account, no authentication, no external requests
+- **Time Analytics** – View daily and hourly trends with time spent per site
+- **Zero Telemetry** – Complete data ownership and privacy
+- **Midnight Boundaries** – Automatic session splitting for accurate daily analytics
+
+## Built With Modern Tech
+
+LuminTime leverages cutting-edge web technologies:
+
+- **[WXT](https://wxt.dev/)** – Modern web extension framework with hot module replacement
+- **[Vue 3](https://vuejs.org/)** – Progressive JavaScript framework for the UI
+- **[Dexie.js](https://dexie.dev/)** – Powerful IndexedDB wrapper for local storage
+- **[Tailwind CSS 4](https://tailwindcss.com/)** & **[DaisyUI 5](https://daisyui.com/)** – Modern styling
+
+<Info>
+  LuminTime is open source under the MIT License. Contribute or audit the code on [GitHub](https://github.com/nuttycc/LuminTime).
+</Info>
+
+## Ready to Get Started?
+
+Install LuminTime and start tracking your browsing activity with complete privacy:
+
+<Card title="Install from Chrome Web Store" icon="download" href="/installation">
+  Get LuminTime installed in minutes with our step-by-step guide.
+</Card>

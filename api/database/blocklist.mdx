@@ -1,0 +1,333 @@
+---
+title: Blocklist Management
+description: Functions for managing the site blocklist to exclude sites from tracking
+---
+
+The blocklist module provides functions to manage a list of hostnames that should be excluded from activity tracking.
+
+## Core Functions
+
+### getBlocklist
+
+Retrieve the current blocklist of hostnames.
+
+**Returns:** `Promise<string[]>`
+
+Array of normalized hostnames that are blocked from tracking.
+
+```typescript
+import { getBlocklist } from '@/db/blocklist';
+
+const blocklist = await getBlocklist();
+console.log(blocklist); // ['example.com', 'facebook.com', ...]
+```
+
+---
+
+### setBlocklist
+
+Replace the entire blocklist with a new set of hostnames.
+
+<ParamField path="hostnames" type="string[]" required>
+  Array of hostnames to block. Each hostname will be normalized automatically.
+</ParamField>
+
+```typescript
+import { setBlocklist } from '@/db/blocklist';
+
+// Set a new blocklist
+await setBlocklist(['example.com', 'facebook.com', 'twitter.com']);
+
+// Accepts various URL formats - all get normalized
+await setBlocklist([
+  'https://example.com/page',  // → 'example.com'
+  '*.subdomain.com',           // → 'subdomain.com'
+  'www.github.com',            // → 'github.com'
+]);
+```
+
+<Info>
+The function automatically:
+- Normalizes all hostnames (removes protocols, www prefix, paths, etc.)
+- Removes duplicates
+- Filters out empty values
+</Info>
+
+---
+
+### addToBlocklist
+
+Add a single hostname to the blocklist.
+
+<ParamField path="input" type="string" required>
+  Hostname or URL to add to the blocklist
+</ParamField>
+
+**Returns:** `Promise<boolean>`
+
+Returns `true` if the hostname was added, `false` if it was already in the blocklist or invalid.
+
+```typescript
+import { addToBlocklist } from '@/db/blocklist';
+
+// Add a hostname
+const added = await addToBlocklist('example.com');
+console.log(added); // true
+
+// Try to add again - already exists
+const addedAgain = await addToBlocklist('example.com');
+console.log(addedAgain); // false
+
+// Accepts various formats
+await addToBlocklist('https://www.example.com/path'); // Normalized to 'example.com'
+await addToBlocklist('*.example.com');                // Normalized to 'example.com'
+```
+
+---
+
+### removeFromBlocklist
+
+Remove a hostname from the blocklist.
+
+<ParamField path="hostname" type="string" required>
+  Hostname to remove from the blocklist
+</ParamField>
+
+**Returns:** `Promise<boolean>`
+
+Returns `true` if the hostname was removed, `false` if it wasn't in the blocklist.
+
+```typescript
+import { removeFromBlocklist } from '@/db/blocklist';
+
+const removed = await removeFromBlocklist('example.com');
+console.log(removed); // true if removed, false if not found
+```
+
+---
+
+### isHostnameBlocked
+
+Check if a hostname is in the blocklist (synchronous check).
+
+<ParamField path="hostname" type="string" required>
+  Hostname to check
+</ParamField>
+
+<ParamField path="blocklist" type="string[]" required>
+  Blocklist array to check against (obtain from `getBlocklist()`)
+</ParamField>
+
+**Returns:** `boolean`
+
+Returns `true` if the hostname is blocked.
+
+```typescript
+import { isHostnameBlocked, getBlocklist } from '@/db/blocklist';
+
+const blocklist = await getBlocklist();
+
+// Check if a site is blocked
+const blocked = isHostnameBlocked('example.com', blocklist);
+console.log(blocked); // true or false
+
+// Works with various formats
+isHostnameBlocked('https://www.example.com/page', blocklist); // Also works
+```
+
+<Tip>
+This is a synchronous function for performance. Retrieve the blocklist once with `getBlocklist()` and reuse it for multiple checks.
+</Tip>
+
+---
+
+## Utility Functions
+
+### normalizeBlockInput
+
+Normalize a hostname or URL input for consistent blocklist storage.
+
+<ParamField path="input" type="string" required>
+  Raw hostname or URL string
+</ParamField>
+
+**Returns:** `string`
+
+Normalized hostname or empty string if invalid.
+
+```typescript
+import { normalizeBlockInput } from '@/db/blocklist';
+
+// Various formats all normalize to the same hostname
+normalizeBlockInput('https://www.example.com/page?query=1');
+// → 'example.com'
+
+normalizeBlockInput('*.example.com');
+// → 'example.com'
+
+normalizeBlockInput('www.example.com');
+// → 'example.com'
+
+normalizeBlockInput('EXAMPLE.COM');
+// → 'example.com'
+
+normalizeBlockInput('  Example.com  ');
+// → 'example.com'
+```
+
+**Normalization Rules:**
+
+1. Trims whitespace and converts to lowercase
+2. Removes `*.` wildcard prefix
+3. Extracts hostname from full URLs
+4. Removes path and query parameters
+5. Removes `www.` prefix
+6. Returns empty string for invalid input
+
+---
+
+### notifyBlocklistUpdate
+
+Send a message to notify other parts of the extension that the blocklist was updated.
+
+```typescript
+import { notifyBlocklistUpdate } from '@/db/blocklist';
+
+// After updating the blocklist
+await setBlocklist(['example.com', 'facebook.com']);
+notifyBlocklistUpdate(); // Notify background service worker
+```
+
+<Info>
+This function sends a `"blocklist-updated"` message via `browser.runtime.sendMessage()`. The background service worker can listen for this message to reload the blocklist.
+</Info>
+
+---
+
+## Usage Examples
+
+### Building a Blocklist Manager
+
+```typescript
+import {
+  getBlocklist,
+  addToBlocklist,
+  removeFromBlocklist,
+  notifyBlocklistUpdate
+} from '@/db/blocklist';
+
+// Component state
+const blocklist = ref<string[]>([]);
+
+// Load blocklist
+async function loadBlocklist() {
+  blocklist.value = await getBlocklist();
+}
+
+// Add a site
+async function blockSite(input: string) {
+  const added = await addToBlocklist(input);
+  if (added) {
+    await loadBlocklist(); // Refresh list
+    notifyBlocklistUpdate(); // Notify background
+  }
+  return added;
+}
+
+// Remove a site
+async function unblockSite(hostname: string) {
+  const removed = await removeFromBlocklist(hostname);
+  if (removed) {
+    await loadBlocklist(); // Refresh list
+    notifyBlocklistUpdate(); // Notify background
+  }
+  return removed;
+}
+```
+
+### Checking Before Recording Activity
+
+```typescript
+import { getBlocklist, isHostnameBlocked } from '@/db/blocklist';
+import { recordActivity } from '@/db/service';
+
+// Cache blocklist in background script
+let cachedBlocklist: string[] = [];
+
+async function refreshBlocklist() {
+  cachedBlocklist = await getBlocklist();
+}
+
+// Listen for blocklist updates
+browser.runtime.onMessage.addListener((message) => {
+  if (message === 'blocklist-updated') {
+    refreshBlocklist();
+  }
+});
+
+// Check before recording
+async function trackActivity(url: string, duration: number) {
+  const hostname = new URL(url).hostname;
+  
+  if (isHostnameBlocked(hostname, cachedBlocklist)) {
+    console.log('Site is blocked, skipping tracking');
+    return;
+  }
+  
+  await recordActivity(url, duration);
+}
+
+// Initialize
+refreshBlocklist();
+```
+
+### Bulk Import from Text
+
+```typescript
+import { setBlocklist, notifyBlocklistUpdate } from '@/db/blocklist';
+
+async function importBlocklist(text: string) {
+  // Parse text (one hostname per line)
+  const hostnames = text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#')); // Filter comments
+  
+  await setBlocklist(hostnames);
+  notifyBlocklistUpdate();
+  
+  console.log(`Imported ${hostnames.length} hostnames`);
+}
+
+// Example usage
+const blocklistText = `
+# Social media
+facebook.com
+twitter.com
+instagram.com
+
+# News sites
+example.com
+news.example.org
+`;
+
+await importBlocklist(blocklistText);
+```
+
+---
+
+## Data Storage
+
+The blocklist is stored in the `meta` table with the key `"blocklist.hostnames"`:
+
+```typescript
+// Internal storage structure
+{
+  key: 'blocklist.hostnames',
+  value: ['example.com', 'facebook.com', ...]
+}
+```
+
+<Warning>
+Direct manipulation of the meta table is not recommended. Always use the provided blocklist functions to ensure data consistency.
+</Warning>

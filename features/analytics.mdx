@@ -1,0 +1,474 @@
+---
+title: 'Analytics Dashboard'
+description: 'Explore your time analytics with daily trends, hourly heatmaps, and site statistics'
+icon: 'chart-line'
+---
+
+## Overview
+
+LuminTime provides powerful analytics to help you understand your browsing habits. All analytics are computed in real-time from your local IndexedDB database, with no server-side processing.
+
+<CardGroup cols={3}>
+  <Card title="Daily Trends" icon="chart-area">
+    Visualize time spent per day
+  </Card>
+  <Card title="Hourly Heatmaps" icon="table-cells">
+    See when you're most active
+  </Card>
+  <Card title="Site Statistics" icon="ranking-star">
+    Track top sites and pages
+  </Card>
+</CardGroup>
+
+## Home Dashboard
+
+The home view shows today's activity at a glance:
+
+### Today's Top Sites
+
+See the sites you've spent the most time on today, sorted by duration:
+
+```typescript
+export function getTodayTopSites(limit = 10) {
+  const today = getTodayStr();
+  return getAggregatedSites(today, today, limit);
+}
+
+export async function getAggregatedSites(
+  startDate: string,
+  endDate: string,
+  limit = 50
+): Promise<ISiteStat[]> {
+  const siteMap = new Map<string, ISiteStat>();
+  
+  await db.sites
+    .where('date')
+    .between(startDate, endDate, true, true)
+    .each((record) => {
+      addSiteDuration(siteMap, record);
+    });
+  
+  return getSortedTopSites(siteMap, limit);
+}
+```
+
+Each site shows:
+- **Hostname**: The domain name (e.g., github.com)
+- **Duration**: Total time spent (e.g., 2h 15m)
+- **Last Visit**: When you last visited
+- **Icon**: Site favicon (when available)
+
+<Note>
+Click any site to view detailed page-level statistics and activity logs.
+</Note>
+
+## Insights View
+
+The insights view provides weekly analytics with comparisons to the previous week.
+
+### Weekly Overview
+
+The top card shows your total time this week compared to last week:
+
+```typescript
+export async function getWeeklyInsights(
+  startStr: string,
+  endStr: string
+): Promise<WeeklyInsights> {
+  const lastWeekStart = formatDate(addDays(parseDate(startStr), -7));
+  const lastWeekEnd = formatDate(addDays(parseDate(endStr), -7));
+  
+  // Get this week's data
+  const thisWeekData = await getRangeStats(startStr, endStr);
+  const thisWeekTotal = thisWeekData.trend.reduce((sum, d) => sum + d.duration, 0);
+  
+  // Get last week's data
+  const lastWeekData = await getRangeStats(lastWeekStart, lastWeekEnd);
+  const lastWeekTotal = lastWeekData.trend.reduce((sum, d) => sum + d.duration, 0);
+  
+  // Calculate change percentage
+  const changePercent = lastWeekTotal > 0
+    ? ((thisWeekTotal - lastWeekTotal) / lastWeekTotal) * 100
+    : 0;
+  
+  return {
+    thisWeekTotal,
+    lastWeekTotal,
+    changePercent,
+    dailyTrend: thisWeekData.trend,
+    heatmap: await buildWeeklyHeatmap(startStr, endStr),
+    topSitesComparison: await compareSites(startStr, endStr, lastWeekStart, lastWeekEnd)
+  };
+}
+```
+
+Example output:
+
+```
+This Week: 24h 35m
+vs last week: ↑ 18%
+```
+
+### Daily Trend Chart
+
+A bar chart shows time spent each day of the week:
+
+```typescript
+const chartItems = computed<ChartItem[]>(() => {
+  return insights.value.dailyTrend.map((item) => {
+    const d = parseDate(item.date);
+    const label = d.toLocaleDateString(undefined, { weekday: 'narrow' });
+    return {
+      key: item.date,
+      value: item.duration,
+      label,
+      tooltip: `${d.toLocaleDateString()}: ${prettyMs(item.duration, { compact: true })}`,
+      ariaLabel: `${d.toLocaleDateString({ weekday: 'long' })}: ${prettyMs(item.duration, { verbose: true })}`
+    };
+  });
+});
+```
+
+<Info>
+Hover over bars to see detailed duration for each day. The chart automatically scales to show relative differences.
+</Info>
+
+### Activity Heatmap
+
+A 7x24 grid shows your most active hours throughout the week:
+
+```typescript
+const heatmap = Array.from({ length: 7 }, () => 
+  Array.from({ length: 24 }, () => 0)
+);
+
+// Populate from raw history logs
+await db.history
+  .where('date')
+  .between(startDate, endDate, true, true)
+  .each((record) => {
+    const date = parseDate(record.date);
+    const dayOfWeek = (date.getDay() + 6) % 7; // 0 = Monday
+    const hour = new Date(record.startTime).getHours();
+    heatmap[dayOfWeek][hour] += record.duration;
+  });
+```
+
+The heatmap uses color intensity to show activity levels:
+- Darker cells = more time spent
+- Lighter cells = less time spent
+- Empty cells = no activity
+
+### Site Comparison
+
+Compare this week's top sites to last week:
+
+```typescript
+interface SiteComparison {
+  hostname: string;
+  thisWeek: number;     // Duration in ms
+  lastWeek: number;     // Duration in ms
+  changePercent: number; // Percentage change
+}
+```
+
+Each site shows:
+- **This week**: Current week's duration
+- **Last week**: Previous week's duration
+- **Change badge**: 
+  - ↑ 25% (red) = Increased time
+  - ↓ 15% (green) = Decreased time
+  - New (blue) = First visit this week
+
+<Warning>
+Site comparisons require at least one week of historical data. New users will see "No previous week data" until they've used the extension for 7+ days.
+</Warning>
+
+## Site Detail View
+
+Click any site from the home view to see detailed statistics:
+
+### Page Breakdown
+
+See individual pages within the site, sorted by time spent:
+
+```typescript
+export async function getAggregatedPages(
+  hostname: string,
+  startDate: string,
+  endDate: string
+): Promise<IPageStat[]> {
+  const dayQueries: Promise<IPageStat[]>[] = [];
+  let current = parseDate(startDate);
+  const end = parseDate(endDate);
+  
+  while (current <= end) {
+    const dayStr = formatDate(current);
+    dayQueries.push(
+      db.pages.where('[date+hostname]').equals([dayStr, hostname]).toArray()
+    );
+    current = addDays(current, 1);
+  }
+  
+  const allPages = (await Promise.all(dayQueries)).flat();
+  const pageMap = new Map<string, IPageStat>();
+  
+  for (const page of allPages) {
+    const existing = pageMap.get(page.path);
+    if (!existing) {
+      pageMap.set(page.path, { ...page });
+    } else {
+      existing.duration += page.duration;
+      existing.title = page.title ?? existing.title;
+    }
+  }
+  
+  return Array.from(pageMap.values()).sort((a, b) => b.duration - a.duration);
+}
+```
+
+Each page shows:
+- **Path**: URL path (e.g., /repo/issues)
+- **Title**: Page title
+- **Duration**: Time spent on this specific page
+
+### Activity Timeline
+
+View chronological activity logs for the site:
+
+```typescript
+export async function getHistoryLogs(
+  startDate: string,
+  endDate: string,
+  hostname?: string,
+  path?: string,
+  limit = 2000
+): Promise<IHistoryLog[]> {
+  const dates = buildDateRangeDescending(startDate, endDate, MAX_DATE_QUERIES);
+  const records: IHistoryLog[] = [];
+  
+  for (const dayStr of dates) {
+    const dayRecords = await db.history
+      .where('[date+hostname]')
+      .equals([dayStr, hostname])
+      .toArray();
+    dayRecords.sort((a, b) => b.startTime - a.startTime);
+    
+    records.push(...dayRecords);
+    if (records.length >= limit) break;
+  }
+  
+  return records.slice(0, limit);
+}
+```
+
+Each log entry shows:
+- **Timestamp**: When the session started
+- **Duration**: How long the session lasted
+- **Page title**: What page was visited
+- **Event source**: How the session started (tab_activated, navigation, etc.)
+
+<Note>
+Activity logs are limited to the most recent 2,000 entries to maintain performance.
+</Note>
+
+## Date Navigation
+
+All views include date navigation to explore historical data:
+
+```typescript
+// Navigate between days
+const selectedDate = ref(new Date());
+
+const goToPreviousDay = () => {
+  selectedDate.value = addDays(selectedDate.value, -1);
+};
+
+const goToNextDay = () => {
+  selectedDate.value = addDays(selectedDate.value, 1);
+};
+
+const goToToday = () => {
+  selectedDate.value = new Date();
+};
+```
+
+<Info>
+Use arrow buttons to navigate days, or click "Today" to jump to the current day.
+</Info>
+
+## Data Aggregation
+
+LuminTime uses efficient aggregation strategies:
+
+### Real-Time Aggregation
+
+Site and page statistics are computed on-the-fly:
+
+```typescript
+export function addSiteDuration(map: Map<string, ISiteStat>, stat: ISiteStat): void {
+  const existing = map.get(stat.hostname);
+  
+  if (!existing) {
+    map.set(stat.hostname, { ...stat });
+    return;
+  }
+  
+  existing.duration += stat.duration;
+  if (stat.lastVisit > existing.lastVisit) {
+    existing.lastVisit = stat.lastVisit;
+    existing.iconUrl = stat.iconUrl ?? existing.iconUrl;
+  }
+}
+```
+
+### Pre-Aggregated Data
+
+The `sites` and `pages` tables store daily aggregates:
+
+- **sites**: One row per site per day
+- **pages**: One row per page per day
+- **history**: Raw logs with full granularity
+
+This hybrid approach balances query performance with data fidelity.
+
+### Hourly Summaries
+
+Old raw logs are aggregated into hourly summaries:
+
+```typescript
+export async function getHourlyTrend(date: string): Promise<{ hour: string; duration: number }[]> {
+  const hours = Array.from({ length: 24 }, (_, hour) => ({
+    hour: hour.toString(),
+    duration: 0
+  }));
+  
+  // First check aggregated hourly stats
+  const aggregated = await db.hourlyStats.where('date').equals(date).toArray();
+  for (const stat of aggregated) {
+    if (stat.hour >= 0 && stat.hour < 24) {
+      hours[stat.hour].duration += stat.duration;
+    }
+  }
+  
+  // Then add any raw history logs for recent dates
+  await db.history
+    .where('date')
+    .equals(date)
+    .each((record) => {
+      const hour = new Date(record.startTime).getHours();
+      if (hour >= 0 && hour < 24) {
+        hours[hour].duration += record.duration;
+      }
+    });
+  
+  return hours;
+}
+```
+
+<Note>
+Hourly trends seamlessly combine aggregated and raw data, providing accurate results regardless of retention settings.
+</Note>
+
+## Performance Optimizations
+
+LuminTime uses several techniques to maintain fast queries:
+
+### Compound Indexes
+
+All tables use compound indexes for efficient range queries:
+
+```typescript
+db.version(1).stores({
+  history: '++id, date, [date+hostname], hostname, startTime',
+  sites: '[date+hostname], date, hostname',
+  pages: '[date+hostname+path], date, hostname',
+  hourlyStats: '[date+hour], date'
+});
+```
+
+Queries like "all sites for date range" use the `date` index:
+
+```typescript
+await db.sites
+  .where('date')
+  .between('2026-03-01', '2026-03-08', true, true)
+  .each((record) => { /* process */ });
+```
+
+### Parallel Queries
+
+Multi-day queries run in parallel:
+
+```typescript
+const dayQueries: Promise<IPageStat[]>[] = [];
+let current = parseDate(startDate);
+
+while (current <= end) {
+  dayQueries.push(
+    db.pages.where('[date+hostname]').equals([dayStr, hostname]).toArray()
+  );
+  current = addDays(current, 1);
+}
+
+const allPages = (await Promise.all(dayQueries)).flat();
+```
+
+### Cursor Iteration
+
+Large result sets use Dexie cursors to avoid loading all data into memory:
+
+```typescript
+await db.sites
+  .where('date')
+  .between(startDate, endDate, true, true)
+  .each((record) => {
+    // Process one record at a time
+    addSiteDuration(siteMap, record);
+  });
+```
+
+<Info>
+Even with years of data, queries remain fast thanks to indexed access and cursor-based iteration.
+</Info>
+
+## Live Query Updates
+
+The UI automatically updates when data changes:
+
+```typescript
+import { useLiveQuery } from '@/composables/useDexieLiveQuery';
+
+const topSites = useLiveQuery<ISiteStat[]>(
+  () => getTodayTopSites(10),
+  [],
+  []
+);
+```
+
+When new activity is recorded:
+1. Database tables are updated
+2. Dexie emits change events
+3. Live queries automatically re-run
+4. Vue reactivity updates the UI
+
+<Note>
+You'll see your analytics update in real-time as you browse, without needing to refresh.
+</Note>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Session Tracking" icon="clock" href="/features/session-tracking">
+    Learn how sessions are tracked
+  </Card>
+  <Card title="Data Management" icon="database" href="/features/data-management">
+    Export and manage your data
+  </Card>
+  <Card title="Privacy" icon="shield" href="/features/privacy">
+    Understand data privacy
+  </Card>
+  <Card title="Blocklist" icon="ban" href="/features/blocklist">
+    Exclude sites from analytics
+  </Card>
+</CardGroup>
